@@ -471,6 +471,10 @@ svg.glass{width:34px;height:46px;flex:0 0 auto}
 .ob .perk span{font-size:13px;color:#a39e95;display:block}
 .ob .gbtn{background:#d4a32a;color:#121212;border:0;border-radius:999px;padding:15px;font-weight:600;font-size:16px;width:100%}
 .ob .obline{background:none;border:1.5px solid #4a4743;color:#f4f1eb;border-radius:999px;padding:14px;font-weight:600;font-size:16px;width:100%}
+.pwrap{position:relative}
+.pwrap input{padding-right:70px}
+.pshow{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:#d4a32a;font-weight:600;font-size:14px;padding:8px 10px}
+.ob form{margin:0}
 .ob .lbtn{background:none;border:0;color:#cfc8bb;padding:10px;font-size:14px;text-decoration:underline;text-underline-offset:3px}
 .ob .err{color:#f19bb0;font-size:14px;font-weight:600}
 
@@ -1119,32 +1123,35 @@ function visitSheet(){const o=openState();sheet(`<div class="hero"><img src="${I
   <div class="tl"><b>2020</b><span>Rollertown starts as a small local brewery in Celina, Texas.</span><b>2024</b><span>Frisco HQ opens on Main Street on October 24, with a taproom, Lager Hall and the Backyard stage.</span><b>Now</b><span>Craft beer, distillery cocktails, live music and food trucks, brewed right next door.</span></div>
  </div>
  <button class="btn line block" data-act="close">Done</button>`)}
-function signinSheet(){sheet(`<div class="stack" style="gap:4px"><span class="label">Rollertown Rewards</span><h2>Welcome back</h2><p class="small muted">We'll text you a code to sign in.</p></div><div class="field"><label class="small muted" for="siPhone">Phone or email</label><input id="siPhone" value="(214) 555-0923" autocomplete="username"></div><button class="btn gold block" data-act="signin2">Send code</button><button class="btn line block" data-act="join">New here? Create an account</button>`)}
 function toursSheet(){sheet(`<div class="hero"><img src="${IMG.story}" alt="The Rollertown brewhouse"></div><div class="stack" style="gap:4px"><span class="tag">Coming soon</span><h2>Brewery tours</h2><p class="muted">Walk the brewhouse with the brewers, taste from the tanks, and leave with a souvenir glass. Tours are being scheduled now.</p></div><button class="btn gold block" data-act="waitlist" ${S.waitlist?'disabled':''}>${S.waitlist?'You’re on the waitlist':'Join the waitlist'}</button><button class="btn line block" data-act="close">Close</button>`)}
 
 /* ---------- onboarding ---------- */
 let OB={step:0,err:''};
 function obDone(){try{return localStorage.getItem('rt-onboarded')==='1'}catch(e){return false}}
 function renderOb(){const st=OB.step;
- const bg=st===0?IMG.dusk:st===1?IMG.backyard:st==='si'||st==='code'?IMG.bgcans:IMG.beers;
+ const bg=st===0?IMG.dusk:st===1?IMG.backyard:st==='si'||st==='forgot'?IMG.bgcans:IMG.beers;
  $('#obRoot').innerHTML=`<div class="ob" role="dialog" aria-modal="true" aria-label="Join Rollertown Rewards"><img class="bgimg" src="${bg}" alt=""><div class="fade"></div><div class="in">
   ${typeof st==='number'?`<div class="dots" aria-hidden="true">${[0,1,2].map(i=>`<i class="${i<=st?'on':''}"></i>`).join('')}</div>`:''}
   <img class="word" src="${IMG.word_white}" alt="Rollertown Beerworks">
   ${st===0?`<h1>Fresh beer. Live music. Points on all of it.</h1>
    <div class="stack">${[['beers','See what’s on tap','Live from the brewery, plus the Vault'],['p_lucha','Buy show tickets','Right in the app, and earn points'],['roundel','Earn rewards','Free pints, flights, tickets and Mug Club']].map(([i,a,b])=>`<div class="perk"><img src="${IMG[i]}" alt=""><div><b>${a}</b><span>${b}</span></div></div>`).join('')}</div>
    <button class="gbtn" data-act="ob" data-v="1">Create an account</button><button class="obline" data-act="ob" data-v="si">Sign in</button><button class="lbtn" data-act="obskip">Browse without an account</button>`
-  :st==='si'?`<h1>Welcome back</h1><p>Sign in with the phone number on your Rollertown account. We'll text you a 6-digit code.</p>
-   <div class="field"><label for="obSiPhone">Phone number</label><input id="obSiPhone" type="tel" value="${esc(S.phone)}" autocomplete="tel"></div>
+  :st==='si'?`<h1>Welcome back</h1><p>Sign in to see your points, rewards and tickets.</p>
+   <form id="obSiForm" class="stack" style="gap:14px" novalidate>
+   <div class="field"><label for="obSiEmail">Email</label><input id="obSiEmail" type="email" value="${esc(OB.email||'')}" autocomplete="username" inputmode="email" autocapitalize="off"></div>
+   <div class="field"><label for="obSiPass">Password</label><div class="pwrap"><input id="obSiPass" type="password" autocomplete="current-password"><button type="button" class="pshow" data-act="pshow" data-v="obSiPass">Show</button></div></div>
    ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}
-   <button class="gbtn" data-act="obsend">Send code</button><button class="lbtn" data-act="ob" data-v="0">Back</button>`
-  :st==='code'?`<h1>Enter your code</h1><p>Sent to ${esc(OB.phone||S.phone)}. For the demo, any 6 digits work.</p>
-   <div class="field"><label for="obCode">6-digit code</label><input id="obCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••" style="font-size:28px;letter-spacing:.4em;text-align:center"></div>
-   ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}
-   <button class="gbtn" data-act="obverify">Sign in</button><button class="lbtn" data-act="obsend">Resend code</button>`
+   <button type="submit" class="gbtn">Sign in</button></form>
+   <button class="lbtn" data-act="obforgot">Forgot password?</button><button class="lbtn" data-act="ob" data-v="0" style="margin-top:-12px">Back</button>`
+  :st==='forgot'?`<h1>Reset your password</h1><p>Enter the email on your account and we'll send you a link to set a new password.</p>
+   <div class="field"><label for="obFgEmail">Email</label><input id="obFgEmail" type="email" value="${esc(OB.email||'')}" autocomplete="email" inputmode="email" autocapitalize="off"></div>
+   ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}${OB.sent?`<p style="color:#9fd9b4;font-weight:600">Check your inbox. If an account uses that email, a reset link is on its way.</p>`:''}
+   <button class="gbtn" data-act="obreset">Send reset link</button><button class="lbtn" data-act="ob" data-v="si">Back to sign in</button>`
   :st===1?`<h1>Join Rollertown Rewards</h1><p>You must be 21 or older to join.</p>
    <div class="g2"><div class="field"><label for="obFirst">First name</label><input id="obFirst" value="${esc(S.name)}" autocomplete="given-name"></div><div class="field"><label for="obLast">Last name</label><input id="obLast" value="${esc(S.last)}" autocomplete="family-name"></div></div>
    <div class="field"><label for="obPhone">Phone</label><input id="obPhone" type="tel" value="${esc(S.phone)}" autocomplete="tel"></div>
    <div class="field"><label for="obEmail">Email (use the one you buy tickets with)</label><input id="obEmail" type="email" value="${esc(S.email)}" autocomplete="email"></div>
+   <div class="field"><label for="obPass">Create a password</label><div class="pwrap"><input id="obPass" type="password" autocomplete="new-password" placeholder="At least 8 characters"><button type="button" class="pshow" data-act="pshow" data-v="obPass">Show</button></div></div>
    <div class="field"><label for="obBday">Birthday</label><input id="obBday" type="date" value="${esc(S.bday)}"></div>
    ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}
    <button class="gbtn" data-act="ob" data-v="2">Continue</button>`
@@ -1166,8 +1173,7 @@ document.addEventListener('click',e=>{
  if(a==='notes')return notesSheet();
  if(a==='visit')return visitSheet();
  if(a==='join'){closeSheet();OB={step:1,err:''};return renderOb()}
- if(a==='signin')return signinSheet();
- if(a==='signin2'){const v2=$('#siPhone').value.trim();if(v2.length<5)return toast('Enter your phone number or email');S.account=true;save();closeSheet();render();return toast('Welcome back, '+S.name)}
+ if(a==='signin'){closeSheet();OB={step:'si',err:''};return renderOb()}
  if(a==='signout'){S.account=false;save();closeSheet();go('home');return toast('Signed out. You can still browse and buy tickets.')}
  if(a==='profile')return profileSheet();
  if(a==='invite')return inviteSheet();
@@ -1178,12 +1184,14 @@ document.addEventListener('click',e=>{
  if(a==='onboard'){closeSheet();OB={step:0,err:''};return renderOb()}
  if(a==='ob'){if(v==='2'){const f=$('#obFirst').value.trim(),l=$('#obLast').value.trim(),ph=$('#obPhone').value.trim(),em=$('#obEmail').value.trim(),bd=$('#obBday').value;
    if(!f||!/\S+@\S+\.\S+/.test(em)||ph.replace(/\D/g,'').length<10){OB.err='Add your first name, a 10-digit phone number and a valid email.';return renderOb()}
+   if(($('#obPass')||{}).value.length<8){OB.err='Choose a password with at least 8 characters.';return renderOb()}
    const b=new Date(bd+'T12:00'),age=(now-b)/(365.25*864e5);if(!bd||isNaN(age)){OB.err='Add your birthday so we can send your birthday pint.';return renderOb()}
    if(age<21){OB.err='You need to be 21 or older to join Rollertown Rewards.';return renderOb()}
    Object.assign(S,{name:f,last:l,phone:ph,email:em,bday:bd});OB.err=''}
   OB.err='';OB.step=isNaN(+v)?v:+v;return renderOb()}
- if(a==='obsend'){const ph=(($('#obSiPhone')||{}).value||OB.phone||'').trim();if(ph.replace(/\D/g,'').length<10){OB.err='Enter the 10-digit phone number on your account.';return renderOb()}OB.phone=ph;OB.err='';OB.step='code';return renderOb()}
- if(a==='obverify'){const c=$('#obCode').value.replace(/\D/g,'');if(c.length!==6){OB.err='Enter all 6 digits from the text.';return renderOb()}S.account=true;save();closeOb();return toast('Welcome back, '+S.name)}
+ if(a==='pshow'){const i=document.getElementById(v);const on=i.type==='password';i.type=on?'text':'password';el.textContent=on?'Hide':'Show';return}
+ if(a==='obforgot'){OB.email=(($('#obSiEmail')||{}).value||OB.email||'').trim();OB.err='';OB.sent=false;OB.step='forgot';return renderOb()}
+ if(a==='obreset'){const em=($('#obFgEmail').value||'').trim();OB.email=em;if(!/\S+@\S+\.\S+/.test(em)){OB.err='Enter a valid email address.';OB.sent=false;return renderOb()}OB.err='';OB.sent=true;return renderOb()}
  if(a==='obskip'){S.account=false;save();return closeOb()}
  if(a==='obfinish'){const pend=S.account?0:(S.pendingPts||0);S.account=true;if(pend&&S.tickets.length){earn(pend,'Show tickets · claimed at sign-up','Prekindle');S.pendingPts=0}if(!S.hist.some(h=>h.t==='Welcome bonus'))earn(50,'Welcome bonus');save();closeOb();return toast(v==='1'?'Notifications on. Welcome to Rollertown.':'Welcome to Rollertown')}
  if(a==='menu'){S.menu=v;return render()}
@@ -1257,6 +1265,12 @@ document.addEventListener('click',e=>{
 document.addEventListener('input',e=>{
  if(e.target.id==='vq'){S.vq=e.target.value;const pos=e.target.selectionStart;render();const i=$('#vq');i.focus();i.setSelectionRange(pos,pos);return}
  const k=e.target.dataset.bind;if(!k)return;S.book[k]=e.target.value;const B=S.book,ok=B.day&&B.name.trim()&&/\S+@\S+\.\S+/.test(B.email);const s=$('#bkSend');if(s){s.disabled=!ok;$('#bkHint').textContent=ok?'Our Events Manager replies within one business day. A beverage minimum may apply.':'Pick a date and add your name and email to send.'}});
+document.addEventListener('submit',e=>{if(e.target.id!=='obSiForm')return;e.preventDefault();
+ const em=($('#obSiEmail').value||'').trim(),pw=$('#obSiPass').value;OB.email=em;
+ if(!/\S+@\S+\.\S+/.test(em)){OB.err='Enter the email on your account.';return renderOb()}
+ if(!pw){OB.err='Enter your password.';return renderOb()}
+ if(pw.length<8){OB.err='That email and password don\u2019t match. Try again or reset your password.';return renderOb()}
+ S.email=em;S.account=true;save();OB.err='';closeOb();toast('Welcome back, '+S.name)});
 document.addEventListener('change',e=>{if(e.target.id==='vsort'){S.vsort=e.target.value;render()}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheetRoot').innerHTML)closeSheet()});
 
