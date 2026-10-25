@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
+<meta name="rt-api" content="/api">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rollertown">
@@ -475,6 +476,8 @@ svg.glass{width:34px;height:46px;flex:0 0 auto}
 .pwrap input{padding-right:70px}
 .pshow{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:#d4a32a;font-weight:600;font-size:14px;padding:8px 10px}
 .ob form{margin:0}
+.ob .gbtn:disabled{opacity:.6}
+.btn.arm{background:var(--rose);color:#fff;box-shadow:none}
 .ob .lbtn{background:none;border:0;color:#cfc8bb;padding:10px;font-size:14px;text-decoration:underline;text-underline-offset:3px}
 .ob .err{color:#f19bb0;font-size:14px;font-weight:600}
 
@@ -642,7 +645,36 @@ const S={account:saved.account??true,tab:'home',mode:'guest',menu:'beer',filter:
  queue:[{who:'Maya R.',amt:'$62.40',when:'8 min ago'},{who:'Chris L.',amt:'$18.00',when:'21 min ago'},{who:'Dana P.',amt:'$147.25',when:'1 hr ago',flag:'Over $120 auto-approve limit'}],
  calMonth:new Date(now.getFullYear(),now.getMonth()+1,1)};
 const SAVEKEYS=['account','name','last','email','phone','bday','points','lifetime','tried','ratings','asks','favs','going','tickets','wallet','requests','waitlist','prefs','hist','read','tout','orders'];
-function save(){try{const o={};SAVEKEYS.forEach(k=>o[k]=S[k]);localStorage.setItem('rt4',JSON.stringify(o))}catch(e){}}
+function saveLocal(){try{const o={};SAVEKEYS.forEach(k=>o[k]=S[k]);localStorage.setItem('rt4',JSON.stringify(o))}catch(e){}}
+function save(){saveLocal();scheduleSync()}
+/* ---------- accounts (server) ---------- */
+const API=(document.querySelector('meta[name="rt-api"]')||{}).content||null;
+const MEMBERKEYS=['points','lifetime','tried','ratings','asks','favs','going','tickets','wallet','requests','waitlist','prefs','hist','read','orders'];
+const DEMO_STATE=(()=>{const saved={};return {
+ name:saved.name??'Jordan',last:saved.last??'Avery',email:saved.email??'jordan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
+ points:saved.points??365,lifetime:saved.lifetime??1120,
+ tried:saved.tried??['3754495','3753953','3754573','4215884'],ratings:saved.ratings??{'3754573':5,'3754495':4},asks:saved.asks??[],favs:saved.favs??['3754573'],
+ going:saved.going??[],tickets:saved.tickets??[],wallet:saved.wallet??[],requests:saved.requests??[],waitlist:saved.waitlist??false,
+ prefs:saved.prefs??{releases:true,shows:true,points:true,happy:false},
+ hist:saved.hist??[{t:'Kiosk receipt photo · Fri, Oct 16',p:38,src:'Receipt scan'},{t:'Show tickets · Oct 10',p:50,src:'Prekindle'},{t:'Receipt · Sat, Oct 17',p:42,src:'Receipt scan'},{t:'Redeemed any pint on tap',p:-150},{t:'Passport stamp · The Irish',p:5},{t:'Welcome bonus',p:50}],
+ read:false,orders:[]}})();
+const clone=o=>JSON.parse(JSON.stringify(o));
+function freshState(){return {points:50,lifetime:50,tried:[],ratings:{},asks:[],favs:[],going:[],tickets:clone(S.account?[]:S.tickets),wallet:[],requests:clone(S.account?[]:S.requests),waitlist:false,prefs:{releases:true,shows:true,points:true,happy:false},hist:[{t:'Welcome bonus',p:50}],read:false,orders:clone(S.account?[]:S.orders)}}
+let TOKEN=null;try{TOKEN=localStorage.getItem('rt-token')}catch(e){}
+function setToken(t){TOKEN=t;try{t?localStorage.setItem('rt-token',t):localStorage.removeItem('rt-token')}catch(e){}}
+async function api(path,opt={}){const r=await fetch(API+'/'+path,{method:opt.method||'GET',keepalive:!!opt.keepalive,headers:{'content-type':'application/json',...(TOKEN?{authorization:'Bearer '+TOKEN}:{})},body:opt.body?JSON.stringify(opt.body):undefined});let j={};try{j=await r.json()}catch(e){}return {...j,ok:r.ok,status:r.status}}
+function memberState(){const o={};MEMBERKEYS.forEach(k=>o[k]=S[k]);return o}
+function applyMember(m){S.account=true;S.name=m.firstName||S.name;S.last=m.lastName||'';S.email=m.email;S.phone=m.phone||'';if(m.birthday)S.bday=m.birthday;
+ const st=m.state||{},base=st.demo&&st.points==null?DEMO_STATE:(st.points!=null?st:null);
+ if(base)MEMBERKEYS.forEach(k=>{if(base[k]!==undefined)S[k]=clone(base[k])});saveLocal();if(base===DEMO_STATE)syncNow()}
+function clearMember(){const f=freshState();MEMBERKEYS.forEach(k=>S[k]=f[k]);S.tickets=[];S.requests=[];S.orders=[];S.account=false;S.name='';S.last='';S.email='';S.phone='';saveLocal()}
+let syncT=null;
+function syncNow(){if(!API||!TOKEN||!S.account)return;clearTimeout(syncT);api('state',{method:'PUT',body:{state:memberState()}}).then(r=>{if(r.status===401)signedOutByServer()}).catch(()=>{})}
+function scheduleSync(){if(!API||!TOKEN||!S.account)return;clearTimeout(syncT);syncT=setTimeout(syncNow,700)}
+function signedOutByServer(){setToken(null);clearMember();render();toast('Please sign in again.')}
+addEventListener('pagehide',()=>{if(syncT&&API&&TOKEN&&S.account){clearTimeout(syncT);api('state',{method:'PUT',keepalive:true,body:{state:memberState()}}).catch(()=>{})}});
+if(API&&!TOKEN)S.account=false;
+
 function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2600)}
 function earn(p,t,src){if(!S.account)return;S.points+=p;S.lifetime+=p;S.hist.unshift({t,p,src});save()}
 function openState(){const h=HOURS[now.getDay()],t=now.getHours()+now.getMinutes()/60;if(h&&t>=h[0]&&t<h[1])return{open:true,txt:'Open · until '+fmtH(h[1])};for(let i=0;i<8;i++){const d=addDays(now,i),hh=HOURS[d.getDay()];if(hh&&(i>0||t<hh[0]))return{open:false,txt:'Closed · opens '+(i===0?'today':i===1?'tomorrow':DOW[d.getDay()])+' '+fmtH(hh[0])}}return{open:false,txt:'Closed'}}
@@ -1053,6 +1085,7 @@ function profileSheet(){if(!S.account)return sheet(`${joinCard()}<button class="
  <button class="btn line block" data-act="theme">${ico(isDark()?'sun':'moon')}${isDark()?'Light mode':'Dark mode'}</button>
  <button class="btn block" data-act="mode" data-v="staff">Open owner view (staff)</button>
  <button class="btn line block" data-act="signout">Sign out</button>
+ ${API?`<button class="btn line block" data-act="delacct" style="color:var(--rose)">Delete account</button>`:''}
  <button class="btn line block" data-act="onboard">Replay sign-up</button>`)}
 function inviteSheet(){const code=(S.name.toUpperCase().replace(/[^A-Z]/g,'')||'FRIEND')+'100';sheet(`<div class="hero"><img src="${IMG.backyard}" alt=""></div><div class="stack" style="gap:4px"><span class="label">Invite friends</span><h2>Give 100, get 100</h2><p class="muted">When a friend joins with your code and checks in for the first time, you both get 100 points.</p></div><div class="code"><b>${esc(code)}</b><button class="btn sm" data-act="copy" data-v="${esc(code)}">${ico('copy')}Copy</button></div><p class="small muted">3 friends joined with your code so far (sample).</p><button class="btn line block" data-act="close">Done</button>`)}
 function teditSheet(id){const m=TMENU[id],t=TRUCKS.find(x=>x.id===id);sheet(`<div class="stack" style="gap:4px"><span class="label">Truck partner portal</span><h2>${esc(t.name)} menu</h2><p class="small muted">This is the page the truck crew opens from a texted link. Changes go live in the app right away.</p></div>
@@ -1141,20 +1174,20 @@ function renderOb(){const st=OB.step;
    <div class="field"><label for="obSiEmail">Email</label><input id="obSiEmail" type="email" value="${esc(OB.email||'')}" autocomplete="username" inputmode="email" autocapitalize="off"></div>
    <div class="field"><label for="obSiPass">Password</label><div class="pwrap"><input id="obSiPass" type="password" autocomplete="current-password"><button type="button" class="pshow" data-act="pshow" data-v="obSiPass">Show</button></div></div>
    ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}
-   <button type="submit" class="gbtn">Sign in</button></form>
+   <button type="submit" class="gbtn" ${OB.busy?'disabled':''}>${OB.busy?'Signing in…':'Sign in'}</button></form>
    <button class="lbtn" data-act="obforgot">Forgot password?</button><button class="lbtn" data-act="ob" data-v="0" style="margin-top:-12px">Back</button>`
   :st==='forgot'?`<h1>Reset your password</h1><p>Enter the email on your account and we'll send you a link to set a new password.</p>
    <div class="field"><label for="obFgEmail">Email</label><input id="obFgEmail" type="email" value="${esc(OB.email||'')}" autocomplete="email" inputmode="email" autocapitalize="off"></div>
    ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}${OB.sent?`<p style="color:#9fd9b4;font-weight:600">Check your inbox. If an account uses that email, a reset link is on its way.</p>`:''}
    <button class="gbtn" data-act="obreset">Send reset link</button><button class="lbtn" data-act="ob" data-v="si">Back to sign in</button>`
   :st===1?`<h1>Join Rollertown Rewards</h1><p>You must be 21 or older to join.</p>
-   <div class="g2"><div class="field"><label for="obFirst">First name</label><input id="obFirst" value="${esc(S.name)}" autocomplete="given-name"></div><div class="field"><label for="obLast">Last name</label><input id="obLast" value="${esc(S.last)}" autocomplete="family-name"></div></div>
-   <div class="field"><label for="obPhone">Phone</label><input id="obPhone" type="tel" value="${esc(S.phone)}" autocomplete="tel"></div>
-   <div class="field"><label for="obEmail">Email (use the one you buy tickets with)</label><input id="obEmail" type="email" value="${esc(S.email)}" autocomplete="email"></div>
+   <div class="g2"><div class="field"><label for="obFirst">First name</label><input id="obFirst" value="${esc(API?'':S.name)}" autocomplete="given-name"></div><div class="field"><label for="obLast">Last name</label><input id="obLast" value="${esc(API?'':S.last)}" autocomplete="family-name"></div></div>
+   <div class="field"><label for="obPhone">Phone</label><input id="obPhone" type="tel" value="${esc(API?'':S.phone)}" autocomplete="tel"></div>
+   <div class="field"><label for="obEmail">Email (use the one you buy tickets with)</label><input id="obEmail" type="email" value="${esc(API?'':S.email)}" autocomplete="email"></div>
    <div class="field"><label for="obPass">Create a password</label><div class="pwrap"><input id="obPass" type="password" autocomplete="new-password" placeholder="At least 8 characters"><button type="button" class="pshow" data-act="pshow" data-v="obPass">Show</button></div></div>
-   <div class="field"><label for="obBday">Birthday</label><input id="obBday" type="date" value="${esc(S.bday)}"></div>
+   <div class="field"><label for="obBday">Birthday</label><input id="obBday" type="date" value="${esc(API?'':S.bday)}"></div>
    ${OB.err?`<p class="err">${esc(OB.err)}</p>`:''}
-   <button class="gbtn" data-act="ob" data-v="2">Continue</button>`
+   <button class="gbtn" data-act="ob" data-v="2" ${OB.busy?'disabled':''}>${OB.busy?'Creating your account…':'Continue'}</button>`
   :`<h1>You're in. Here's 50 points.</h1><p>Turn on notifications so you hear about new releases, show drops and points the moment they land.</p>
    <div class="stack">${[['bgcans','New beer releases'],['p_halloween','Show announcements'],['bgcan','Points and rewards']].map(([i,a])=>`<div class="perk"><img src="${IMG[i]}" alt=""><div><b>${a}</b></div></div>`).join('')}</div>
    <button class="gbtn" data-act="obfinish" data-v="1">Turn on notifications</button><button class="lbtn" data-act="obfinish" data-v="0">Not now</button>`}
@@ -1169,12 +1202,14 @@ document.addEventListener('click',e=>{
  if(a==='mode'){closeSheet();S.mode=v;render();scrollTo(0,0);return}
  if(a==='theme'){flipTheme();if($('#sheetRoot').innerHTML)profileSheet();return}
  if(a==='reset'){if(!el.classList.contains('arm')){el.classList.add('arm');el.textContent='Tap again to reset';clearTimeout(el._t);el._t=setTimeout(()=>{el.classList.remove('arm');el.textContent='Reset demo'},3000);return}
-  try{['rt4','rt-onboarded'].forEach(k=>localStorage.removeItem(k))}catch(err){}location.reload();return}
+  if(API&&TOKEN)api('logout',{method:'POST',keepalive:true}).catch(()=>{});try{['rt4','rt-onboarded','rt-token'].forEach(k=>localStorage.removeItem(k))}catch(err){}setTimeout(()=>location.reload(),150);return}
  if(a==='notes')return notesSheet();
  if(a==='visit')return visitSheet();
  if(a==='join'){closeSheet();OB={step:1,err:''};return renderOb()}
  if(a==='signin'){closeSheet();OB={step:'si',err:''};return renderOb()}
- if(a==='signout'){S.account=false;save();closeSheet();go('home');return toast('Signed out. You can still browse and buy tickets.')}
+ if(a==='signout'){if(API&&TOKEN){clearTimeout(syncT);api('state',{method:'PUT',body:{state:memberState()}}).finally(()=>api('logout',{method:'POST'}).catch(()=>{}).finally(()=>setToken(null)))}clearMember();closeSheet();go('home');return toast('Signed out. You can still browse and buy tickets.')}
+ if(a==='delacct'){if(!el.classList.contains('arm')){el.classList.add('arm');el.textContent='Tap again to permanently delete';return}
+  api('account',{method:'DELETE'}).then(r=>{if(!r.ok)return toast(r.message||'We couldn’t delete the account. Try again.');setToken(null);clearMember();closeSheet();go('home');toast('Your account was deleted.')}).catch(()=>toast('We can’t reach Rollertown right now.'));return}
  if(a==='profile')return profileSheet();
  if(a==='invite')return inviteSheet();
  if(a==='tours')return toursSheet();
@@ -1187,13 +1222,18 @@ document.addEventListener('click',e=>{
    if(($('#obPass')||{}).value.length<8){OB.err='Choose a password with at least 8 characters.';return renderOb()}
    const b=new Date(bd+'T12:00'),age=(now-b)/(365.25*864e5);if(!bd||isNaN(age)){OB.err='Add your birthday so we can send your birthday pint.';return renderOb()}
    if(age<21){OB.err='You need to be 21 or older to join Rollertown Rewards.';return renderOb()}
+   if(API){const pw=$('#obPass').value,keep=()=>{[['obFirst',f],['obLast',l],['obPhone',ph],['obEmail',em],['obBday',bd],['obPass',pw]].forEach(([id,val])=>{const x=document.getElementById(id);if(x)x.value=val})};
+    OB.busy=true;OB.err='';renderOb();keep();
+    api('signup',{method:'POST',body:{firstName:f,lastName:l,email:em,phone:ph,birthday:bd,password:pw,state:freshState()}}).then(r=>{OB.busy=false;
+     if(!r.ok){OB.err=r.message||'We couldn’t create your account. Try again.';renderOb();return keep()}
+     setToken(r.token);applyMember(r.member);OB.err='';OB.step=2;renderOb()}).catch(()=>{OB.busy=false;OB.err='We can’t reach Rollertown right now. Check your connection and try again.';renderOb();keep()});return}
    Object.assign(S,{name:f,last:l,phone:ph,email:em,bday:bd});OB.err=''}
   OB.err='';OB.step=isNaN(+v)?v:+v;return renderOb()}
  if(a==='pshow'){const i=document.getElementById(v);const on=i.type==='password';i.type=on?'text':'password';el.textContent=on?'Hide':'Show';return}
  if(a==='obforgot'){OB.email=(($('#obSiEmail')||{}).value||OB.email||'').trim();OB.err='';OB.sent=false;OB.step='forgot';return renderOb()}
- if(a==='obreset'){const em=($('#obFgEmail').value||'').trim();OB.email=em;if(!/\S+@\S+\.\S+/.test(em)){OB.err='Enter a valid email address.';OB.sent=false;return renderOb()}OB.err='';OB.sent=true;return renderOb()}
+ if(a==='obreset'){const em=($('#obFgEmail').value||'').trim();OB.email=em;if(!/\S+@\S+\.\S+/.test(em)){OB.err='Enter a valid email address.';OB.sent=false;return renderOb()}OB.err='';OB.sent=true;if(API)api('reset',{method:'POST',body:{email:em}}).catch(()=>{});return renderOb()}
  if(a==='obskip'){S.account=false;save();return closeOb()}
- if(a==='obfinish'){const pend=S.account?0:(S.pendingPts||0);S.account=true;if(pend&&S.tickets.length){earn(pend,'Show tickets · claimed at sign-up','Prekindle');S.pendingPts=0}if(!S.hist.some(h=>h.t==='Welcome bonus'))earn(50,'Welcome bonus');save();closeOb();return toast(v==='1'?'Notifications on. Welcome to Rollertown.':'Welcome to Rollertown')}
+ if(a==='obfinish'){const pend=S.pendingPts||0;S.account=true;if(pend&&S.tickets.length){earn(pend,'Show tickets · claimed at sign-up','Prekindle');S.pendingPts=0}if(!S.hist.some(h=>h.t==='Welcome bonus'))earn(50,'Welcome bonus');save();closeOb();return toast(v==='1'?'Notifications on. Welcome to Rollertown.':'Welcome to Rollertown')}
  if(a==='menu'){S.menu=v;return render()}
  if(a==='bview'){S.beerView=v;S.filter='All';return render()}
  if(a==='filter'){S.filter=v;return render()}
@@ -1214,7 +1254,7 @@ document.addEventListener('click',e=>{
  if(a==='share'){const s=show(v),t=s.name+' at Rollertown Beerworks · '+s.url;try{navigator.clipboard.writeText(t).then(()=>toast('Link copied'),()=>toast('Copy failed. Link: '+s.url))}catch(err){toast(s.url)}return}
  if(a==='buy'){S.buy={show:v,q:{ga:2,vip:0,cabana:0}};return buySheet()}
  if(a==='tq'){const k=el.dataset.k;S.buy.q[k]=Math.max(0,Math.min(k==='cabana'?2:10,S.buy.q[k]+ +v));return buySheet()}
- if(a==='pay'){const B=S.buy,s=show(B.show),sub=TIX.reduce((x,t)=>x+B.q[t.k]*t.price,0);if(!sub)return;const em=($('#pkEmail')||{}).value||'';if(!/\S+@\S+\.\S+/.test(em)){toast('Add the email your tickets should go to');$('#pkEmail')&&$('#pkEmail').focus();return}S.pendingPts=Math.round(sub*1.12);document.querySelector('.sheet').innerHTML='<div class="grab"></div><div class="scan" style="border:0"><div class="spin"></div><span>Confirming with Prekindle…</span></div>';
+ if(a==='pay'){const B=S.buy,s=show(B.show),sub=TIX.reduce((x,t)=>x+B.q[t.k]*t.price,0);if(!sub)return;const em=($('#pkEmail')||{}).value||'';if(!/\S+@\S+\.\S+/.test(em)){toast('Add the email your tickets should go to');$('#pkEmail')&&$('#pkEmail').focus();return}S.pendingPts=S.account?0:Math.round(sub*1.12);document.querySelector('.sheet').innerHTML='<div class="grab"></div><div class="scan" style="border:0"><div class="spin"></div><span>Confirming with Prekindle…</span></div>';
   setTimeout(()=>{const tot=sub*1.12,pts=Math.round(tot),order='PK-'+(90217733+S.tickets.length*7);
    TIX.forEach((t,i)=>{if(B.q[t.k])S.tickets.unshift({id:order+'-'+i,show:B.show,type:t.name.replace(' (up to 6)',''),qty:B.q[t.k],order})});
    earn(pts,'Show tickets · '+s.name,'Prekindle');render();
@@ -1269,7 +1309,11 @@ document.addEventListener('submit',e=>{if(e.target.id!=='obSiForm')return;e.prev
  const em=($('#obSiEmail').value||'').trim(),pw=$('#obSiPass').value;OB.email=em;
  if(!/\S+@\S+\.\S+/.test(em)){OB.err='Enter the email on your account.';return renderOb()}
  if(!pw){OB.err='Enter your password.';return renderOb()}
- if(pw.length<8){OB.err='That email and password don\u2019t match. Try again or reset your password.';return renderOb()}
+ if(!API&&pw.length<8){OB.err='That email and password don\u2019t match. Try again or reset your password.';return renderOb()}
+ if(API){OB.busy=true;OB.err='';renderOb();
+  api('login',{method:'POST',body:{email:em,password:pw}}).then(r=>{OB.busy=false;
+   if(!r.ok){OB.err=r.message||'That email and password don’t match.';return renderOb()}
+   setToken(r.token);applyMember(r.member);OB.err='';closeOb();toast('Welcome back, '+S.name)}).catch(()=>{OB.busy=false;OB.err='We can’t reach Rollertown right now. Check your connection and try again.';renderOb()});return}
  S.email=em;S.account=true;save();OB.err='';closeOb();toast('Welcome back, '+S.name)});
 document.addEventListener('change',e=>{if(e.target.id==='vsort'){S.vsort=e.target.value;render()}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sheetRoot').innerHTML)closeSheet()});
@@ -1280,6 +1324,7 @@ function render(){
 }
 render();
 if(!obDone())renderOb();
+if(API&&TOKEN)api('me').then(r=>{if(r.ok){applyMember(r.member);if(!$('#sheetRoot').innerHTML)render()}else if(r.status===401)signedOutByServer()}).catch(()=>{});
 </script>
 </body>
 </html>
