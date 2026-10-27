@@ -117,7 +117,7 @@ async function signup(req: Request) {
 
   if (!firstName) return fail(400, "first_name", "Add your first name.");
   if (!validEmail(email)) return fail(400, "email", "Enter a valid email address.");
-  if (phone && phone.replace(/\D/g, "").length < 10) return fail(400, "phone", "Phone is optional, but if you add one it needs 10 digits.");
+  if (phone.replace(/\D/g, "").length < 10) return fail(400, "phone", "Add a 10-digit phone number.");
   if (password.length < 8 || password.length > 200) return fail(400, "password", "Choose a password with at least 8 characters.");
   const age = ageFrom(birthday);
   if (age < 0) return fail(400, "birthday", "Add your birthday.");
