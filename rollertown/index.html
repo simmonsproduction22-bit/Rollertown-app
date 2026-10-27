@@ -95,6 +95,10 @@ header.top .wrap{display:flex;align-items:center;gap:8px;height:58px}
 nav.tabs .mid img.rl.ink{display:var(--show-ink)}
 nav.tabs .mid img.rl.white{display:var(--show-white)}
 /* points pill: always white */
+/* home-screen app: no zoom, no input auto-zoom */
+html.standalone,html.standalone body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}
+html.standalone input,html.standalone select,html.standalone textarea{font-size:16px!important}
+
 /* in-app ticket checkout */
 .sheet[data-order="tix"]{height:92%;padding:0;gap:0;overflow:hidden}
 .sheet[data-order="tix"] .grab{margin:8px auto 0}
@@ -925,6 +929,17 @@ function rankBadge(r,size,locked){return `<span class="rbadge ${locked?'locked':
 const POSTIMGS=['bgcans','c_flight','happy','backyard','beers','tacotue'];
 
 /* ---------- state ---------- */
+/* ---------- home-screen app: no pinch or double-tap zoom ---------- */
+(function(){
+ const standalone=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
+ if(!standalone)return;
+ document.documentElement.classList.add('standalone');
+ const vp=document.querySelector('meta[name="viewport"]');
+ if(vp)vp.setAttribute('content','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
+ ['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t,e=>e.preventDefault(),{passive:false}));
+ document.addEventListener('touchmove',e=>{if(e.touches.length>1)e.preventDefault()},{passive:false});
+ let last=0;document.addEventListener('touchend',e=>{const t=Date.now();if(t-last<300&&!e.target.closest('input,textarea,select'))e.preventDefault();last=t},{passive:false});
+})();
 let saved={};try{saved=JSON.parse(localStorage.getItem('rt4')||'{}')}catch(e){}
 const S={reminders:saved.reminders??{},account:saved.account??true,tab:'home',mode:'guest',menu:'beer',filter:'All',beerView:'tap',vq:'',vsort:'rating',
  name:saved.name??'Jordan',last:saved.last??'Avery',email:saved.email??'jordan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
