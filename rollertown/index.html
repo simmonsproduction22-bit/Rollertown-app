@@ -95,6 +95,14 @@ header.top .wrap{display:flex;align-items:center;gap:8px;height:58px}
 nav.tabs .mid img.rl.ink{display:var(--show-ink)}
 nav.tabs .mid img.rl.white{display:var(--show-white)}
 /* points pill: always white */
+/* lock page width: nothing can push the app wider than the screen */
+html,body{overflow-x:clip;max-width:100%}
+@supports not (overflow-x:clip){body{overflow-x:hidden}}
+main,.view,.view>*{min-width:0;max-width:100%}
+.view{overflow-wrap:break-word}
+.show{grid-template-columns:118px minmax(0,1fr)}
+.fb{grid-template-columns:90px minmax(0,1fr)}
+
 /* home-screen app: no zoom, no input auto-zoom */
 html.standalone,html.standalone body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}
 html.standalone input,html.standalone select,html.standalone textarea{font-size:16px!important}
