@@ -95,6 +95,22 @@ header.top .wrap{display:flex;align-items:center;gap:8px;height:58px}
 nav.tabs .mid img.rl.ink{display:var(--show-ink)}
 nav.tabs .mid img.rl.white{display:var(--show-white)}
 /* points pill: always white */
+/* in-app ticket checkout */
+.sheet[data-order="tix"]{height:92%;padding:0;gap:0;overflow:hidden}
+.sheet[data-order="tix"] .grab{margin:8px auto 0}
+.tixhead{display:flex;align-items:center;gap:10px;padding:8px 14px 10px;border-bottom:1px solid var(--line)}
+.tixhead .t{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center}
+.tixhead .t b{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tixhead .t span{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+.tixhead .t span svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2}
+.tixframe{position:relative;flex:1;background:#fff}
+.tixframe iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent}
+.tixload{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#68645d;font-size:14px}
+.spin{width:28px;height:28px;border-radius:50%;border:3px solid #e8e4dd;border-top-color:#d4a32a;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tixfoot{padding:10px 16px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);font-size:13px;color:var(--muted);text-align:center}
+.tixfoot .linkbtn{border:0;background:none;padding:0;color:var(--gold-ink);font-weight:600;font-size:13px}
+
 .ptpill{background:#ffffff!important;color:#121212!important;border-color:#e8e4dd!important}
 /* today */
 .dstrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
@@ -683,7 +699,7 @@ const SHOWS=[
  {id:'queen',date:'2026-11-07',name:'Queen Legacy',sub:'A tribute to Queen',doors:'7:00 PM',showtime:'8:00 PM',age:'All ages',img:'p_queen',pk:'-2852527949009791066',desc:'Queen Legacy recreates the stadium-sized sound of Queen live in the Backyard.'}
 ].map(s=>({...s,d:new Date(s.date+'T00:00:00'),promo:PK+'promo/id/'+s.pk,checkout:PK+'checkout/id/'+s.pk})).filter(s=>s.d>=today);
 const timesLbl=s=>s.doors?`Doors ${s.doors} · Show ${s.showtime}`:`Show ${s.showtime}`;
-function tixBtn(s,cls){return `<a class="${cls||'btn sm gold'}" href="${s.free?s.promo:s.checkout}" target="_blank" rel="noopener" data-act="tixout" data-v="${s.id}">${s.free?'Free · RSVP':'Tickets'}</a>`}
+function tixBtn(s,cls){return `<a class="${cls||'btn sm gold'}" href="${s.free?s.promo:s.checkout}" target="_blank" rel="noopener" data-act="tix" data-v="${s.id}">${s.free?'Free · RSVP':'Tickets'}</a>`}
 const posterFit=s=>s.wide?'object-fit:contain;background:#121212':'';
 const show=id=>SHOWS.find(s=>s.id===id);
 const TIX=[{k:'ga',name:'General admission',sub:'Backyard lawn',price:25,img:'backyard'},{k:'vip',name:'VIP Balcony',sub:'Private balcony seating, cocktail service, best view in the house',price:75,img:'vip'},{k:'cabana',name:'Cabana (up to 6)',sub:'Covered lounge steps from the stage with cocktail service',price:350,img:'cabana'}];
@@ -848,6 +864,8 @@ const showLbl=s=>{const n=Math.round((s.d-today)/864e5);return n===0?'Tonight':n
 function glass(b,cls='glass'){const c=b.color||'#d8a530';return `<svg class="${cls}" viewBox="0 0 40 54" aria-hidden="true"><path d="M5 3h30l-3.5 48h-23z" fill="none" stroke="var(--line)" stroke-width="2"/><path d="M7.2 13h25.6l-2.9 36h-19.8z" fill="${c}"/><path d="M6.4 4h27.2l-.7 9.2H7.1z" fill="#fbf7ee" stroke="var(--line)" stroke-width=".6"/></svg>`}
 function art(b,size){const l=UT.labels[b.id];return `<span class="lab" style="${size?`width:${size}px;height:${size}px`:''}">${l?`<img src="${l}" alt="">`:glass(b,'')}</span>`}
 const ICON={
+ x:'<path d="M6 6l12 12M18 6L6 18"/>',
+ ext:'<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
  home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
  menu:'<path d="M6 3h12l-1.5 18h-9z"/><path d="M6.4 8h11.2"/>',
  events:'<path d="M3 8a2 2 0 0 0 0 4 2 2 0 0 1 0 4v2h18v-2a2 2 0 0 1 0-4 2 2 0 0 0 0-4V6H3z"/><path d="M14 6v12" stroke-dasharray="2 2"/>',
@@ -1200,6 +1218,12 @@ function vStaff(){
 /* ---------- sheets ---------- */
 function sheet(html,tag){$('#sheetRoot').innerHTML=`<div class="scrim" data-act="close"><div class="sheet" role="dialog" aria-modal="true" data-order="${tag||''}"><div class="grab"></div>${html}</div></div>`}
 function closeSheet(){$('#sheetRoot').innerHTML=''}
+function tixSheet(id){const s=show(id),url=s.free?s.promo:s.checkout;
+ sheet(`<div class="tixhead"><button class="ibtn" data-act="close" aria-label="Close">${ico('x')}</button>
+  <div class="t"><b>${esc(s.name)}</b><span>${ico('lock')}Secure checkout · Prekindle</span></div>
+  <a class="ibtn" href="${url}" target="_blank" rel="noopener" data-act="tixout" data-v="${id}" aria-label="Open in browser">${ico('ext')}</a></div>
+ <div class="tixframe"><div class="tixload"><span class="spin"></span>Loading tickets…</div><iframe src="${url}" title="Prekindle checkout for ${esc(s.name)}" allow="payment" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+ <div class="tixfoot">${S.account?`Use <b>${esc(S.email)}</b> at checkout so your points find you.`:`<button class="linkbtn" data-act="ob" data-v="1">Create an account</button> to earn points on tickets.`}</div>`,'tix')}
 function beerSheet(id){const b=beer(id),r=S.ratings[id]||0,got=S.tried.includes(id),tap=onTap(id),asked=S.asks.includes(id),fav=S.favs.includes(id),big=id==='3754495';
  sheet(`${big?`<div class="hero"><img src="${IMG.bgcans}" alt="Big German cans and pints"></div>`:''}
  <div class="bigglass">${art(b,84)}<div class="stack" style="gap:4px;min-width:0;flex:1"><span class="tag ${tap?'ok':''}">${tap?(S.out.includes(id)?'Tapped out':'On tap now'+(b.serve?' · '+b.serve:'')):'In the Vault'}</span><h1 style="font-size:32px">${esc(b.name)}</h1><span class="small muted">${esc(b.style)}</span></div>${S.account?`<button class="heart" data-act="fav" data-v="${id}" aria-pressed="${fav}" aria-label="${fav?'Remove from favorites':'Add to favorites'}">${ico('heart')}</button>`:''}</div>
@@ -1383,6 +1407,7 @@ document.addEventListener('click',e=>{
   if(API&&TOKEN)api('logout',{method:'POST',keepalive:true}).catch(()=>{});try{['rt4','rt-onboarded','rt-token'].forEach(k=>localStorage.removeItem(k))}catch(err){}setTimeout(()=>location.reload(),150);return}
  if(a==='notes')return notesSheet();
  if(a==='tday'){S.dayOff=+v;return render()}
+ if(a==='tix'){e.preventDefault();return tixSheet(v)}
  if(a==='tixout'){return toast(show(v)&&show(v).free?'Opening the RSVP on Prekindle':'Opening Prekindle checkout')}
  if(a==='cgroup'){S.cgroup=v;return render()}
  if(a==='mwmode'){MWQ.mode=v;saveMWQ();render();return toast(v==='paused'?'Online orders paused. Guests see it right away.':v==='busy'?'Marked busy. Wait times went up.':'Taking orders again')}
