@@ -928,7 +928,6 @@ const RANKS=[
  {name:'Regular',min:300,color:'#b8763a',mult:1.1,perks:['1.1× points','Show alerts before the public']},
  {name:'Barstool Pro',min:750,color:'#8f9aa5',mult:1.25,perks:['1.25× points','24-hour early ticket access']},
  {name:'Tap Legend',min:1500,color:'#d4a32a',mult:1.5,perks:['1.5× points','A free flight every quarter','Members-only tastings']},
- {name:'Mug Club',min:2500,color:'#2f5ea8',mult:1.5,perks:['Your own mug on the wall','24 oz pours for the 16 oz price','Member-only releases']},
  {name:'Rollertown Royalty',min:5000,color:'#9b2c4f',mult:2,perks:['2× points','A brew day with the brewers','Your name on the Wall of Regulars']}
 ];
 const TIERS=RANKS.map(r=>[r.name,r.min]);
@@ -1054,7 +1053,7 @@ function notes(){const n=[];
  n.push({img:'__label:5989456',t:'Hope Squad is pouring',s:'Our hibiscus and vanilla hazy IPA with the National Breast Cancer Foundation.',act:'beer',v:'5989456'});
  S.news.forEach(x=>n.unshift({img:x.img,t:x.title,s:x.body,act:'tab',v:'home'}));
  S.pushes.forEach(x=>n.unshift(x));
- if(S.account)n.push({img:'roundel',t:'+42 points from your receipt',s:'Sat, Oct 17 · 323 points to Mug Club.',act:'tab',v:'rewards'});
+ if(S.account)n.push({img:'roundel',t:'+42 points from your receipt',s:'Sat, Oct 17 · 323 points to Tap Legend.',act:'tab',v:'rewards'});
  return n}
 const imgSrc=k=>k.startsWith('__label:')?UT.labels[k.slice(8)]:IMG[k];
 
@@ -1514,7 +1513,7 @@ function renderOb(){const st=OB.step;
   ${typeof st==='number'?`<div class="dots" aria-hidden="true">${[0,1,2].map(i=>`<i class="${i<=st?'on':''}"></i>`).join('')}</div>`:''}
   <img class="word" src="${IMG.word_white}" alt="Rollertown Beerworks">
   ${st===0?`<h1>Fresh beer. Live music. Points on all of it.</h1>
-   <div class="stack">${[['beers','See what’s on tap','Live from the brewery, plus the Vault'],['p_lucha','Buy show tickets','Right in the app, and earn points'],['roundel','Earn rewards','Free pints, flights, tickets and Mug Club']].map(([i,a,b])=>`<div class="perk"><img src="${IMG[i]}" alt=""><div><b>${a}</b><span>${b}</span></div></div>`).join('')}</div>
+   <div class="stack">${[['beers','See what’s on tap','Live from the brewery, plus the Vault'],['p_lucha','Buy show tickets','Right in the app, and earn points'],['roundel','Earn rewards','Free pints, flights, tickets and more']].map(([i,a,b])=>`<div class="perk"><img src="${IMG[i]}" alt=""><div><b>${a}</b><span>${b}</span></div></div>`).join('')}</div>
    <button class="gbtn" data-act="ob" data-v="1">Create an account</button><button class="obline" data-act="ob" data-v="si">Sign in</button><button class="lbtn" data-act="obskip">Browse without an account</button>`
   :st==='si'?`<h1>Welcome back</h1><p>Sign in to see your points, rewards and tickets.</p>
    <form id="obSiForm" class="stack" style="gap:14px" novalidate>
