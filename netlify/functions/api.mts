@@ -139,8 +139,8 @@ async function ensureDemoMember() {
   const hash = await hashPassword(DEMO_PASSWORD);
   await db().sql`
     INSERT INTO members (email, password_hash, first_name, last_name, phone, birthday, state)
-    VALUES (${DEMO_EMAIL}, ${hash}, ${"Jordan"}, ${"Avery"}, ${"(214) 555-0923"}, ${"1994-03-14"}, ${JSON.stringify({ demo: true })}::jsonb)
-    ON CONFLICT (email) DO NOTHING`;
+    VALUES (${DEMO_EMAIL}, ${hash}, ${"Johnathan"}, ${"Avery"}, ${"(214) 555-0923"}, ${"1994-03-14"}, ${JSON.stringify({ demo: true })}::jsonb)
+    ON CONFLICT (email) DO UPDATE SET first_name = EXCLUDED.first_name`;
 }
 
 async function login(req: Request) {

@@ -949,7 +949,7 @@ const POSTIMGS=['bgcans','c_flight','happy','backyard','beers','tacotue'];
 })();
 let saved={};try{saved=JSON.parse(localStorage.getItem('rt4')||'{}')}catch(e){}
 const S={reminders:saved.reminders??{},account:saved.account??true,tab:'home',mode:'guest',menu:'beer',filter:'All',beerView:'tap',vq:'',vsort:'rating',
- name:saved.name??'Jordan',last:saved.last??'Avery',email:saved.email??'jordan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
+ name:saved.name??'Johnathan',last:saved.last??'Avery',email:saved.email??'johnathan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
  points:saved.points??365,lifetime:saved.lifetime??1120,
  tried:saved.tried??['3754495','3753953','3754573','4215884'],ratings:saved.ratings??{'3754573':5,'3754495':4},asks:saved.asks??[],favs:saved.favs??['3754573'],
  going:saved.going??[],tickets:saved.tickets??[],wallet:saved.wallet??[],requests:saved.requests??[],waitlist:saved.waitlist??false,
@@ -966,7 +966,7 @@ function save(){saveLocal();scheduleSync()}
 const API=(document.querySelector('meta[name="rt-api"]')||{}).content||null;
 const MEMBERKEYS=['points','lifetime','tried','ratings','asks','favs','going','tickets','wallet','requests','waitlist','prefs','hist','read','orders'];
 const DEMO_STATE=(()=>{const saved={};return {
- name:saved.name??'Jordan',last:saved.last??'Avery',email:saved.email??'jordan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
+ name:saved.name??'Johnathan',last:saved.last??'Avery',email:saved.email??'johnathan@email.com',phone:saved.phone??'(214) 555-0923',bday:saved.bday??'1994-03-14',
  points:saved.points??365,lifetime:saved.lifetime??1120,
  tried:saved.tried??['3754495','3753953','3754573','4215884'],ratings:saved.ratings??{'3754573':5,'3754495':4},asks:saved.asks??[],favs:saved.favs??['3754573'],
  going:saved.going??[],tickets:saved.tickets??[],wallet:saved.wallet??[],requests:saved.requests??[],waitlist:saved.waitlist??false,
@@ -979,7 +979,7 @@ let TOKEN=null;try{TOKEN=localStorage.getItem('rt-token')}catch(e){}
 function setToken(t){TOKEN=t;try{t?localStorage.setItem('rt-token',t):localStorage.removeItem('rt-token')}catch(e){}}
 async function api(path,opt={}){const r=await fetch(API+'/'+path,{method:opt.method||'GET',keepalive:!!opt.keepalive,headers:{'content-type':'application/json',...(TOKEN?{authorization:'Bearer '+TOKEN}:{})},body:opt.body?JSON.stringify(opt.body):undefined});let j={};try{j=await r.json()}catch(e){}return {...j,ok:r.ok,status:r.status}}
 function memberState(){const o={};MEMBERKEYS.forEach(k=>o[k]=S[k]);return o}
-function applyMember(m){S.account=true;S.name=m.firstName||S.name;S.last=m.lastName||'';S.email=m.email;S.phone=m.phone||'';if(m.birthday)S.bday=m.birthday;
+function applyMember(m){S.account=true;S.name=m.firstName||S.name;if(m.email==='demo@rollertown.app')S.name='Johnathan';S.last=m.lastName||'';S.email=m.email;S.phone=m.phone||'';if(m.birthday)S.bday=m.birthday;
  const st=m.state||{},base=st.demo&&st.points==null?DEMO_STATE:(st.points!=null?st:null);
  if(base)MEMBERKEYS.forEach(k=>{if(base[k]!==undefined)S[k]=clone(base[k])});saveLocal();if(base===DEMO_STATE)syncNow()}
 function clearMember(){const f=freshState();MEMBERKEYS.forEach(k=>S[k]=f[k]);S.tickets=[];S.requests=[];S.orders=[];S.account=false;S.name='';S.last='';S.email='';S.phone='';saveLocal()}
@@ -1680,7 +1680,7 @@ function render(){
  renderChrome();
  $('#app').innerHTML=S.mode==='staff'?vStaff():({home:vHome,menu:vMenu,events:vEvents,rewards:vRewards,book:vBook}[S.tab])();
 }
-/* demo: open already signed in to the public demo account (Jordan Avery) */
+/* demo: open already signed in to the public demo account (Johnathan Avery) */
 const DEMO_LOGIN={email:'demo@rollertown.app',password:'rollertown'};
 function autoDemo(){try{return localStorage.getItem('rt-noauto')!=='1'}catch(e){return true}}
 if(autoDemo()){try{localStorage.setItem('rt-onboarded','1')}catch(e){}if(!API){S.account=true;saveLocal()}}
