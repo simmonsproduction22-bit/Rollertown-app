@@ -1548,7 +1548,7 @@ document.addEventListener('click',e=>{
  if(a==='mode'){closeSheet();S.mode=v;render();scrollTo(0,0);return}
  if(a==='theme'){flipTheme();if($('#sheetRoot').innerHTML)profileSheet();return}
  if(a==='reset'){if(!el.classList.contains('arm')){el.classList.add('arm');el.textContent='Tap again to reset';clearTimeout(el._t);el._t=setTimeout(()=>{el.classList.remove('arm');el.textContent='Reset demo'},3000);return}
-  if(API&&TOKEN)api('logout',{method:'POST',keepalive:true}).catch(()=>{});try{['rt4','rt-onboarded','rt-token'].forEach(k=>localStorage.removeItem(k))}catch(err){}setTimeout(()=>location.reload(),150);return}
+  if(API&&TOKEN)api('logout',{method:'POST',keepalive:true}).catch(()=>{});try{['rt4','rt-onboarded','rt-token','rt-noauto'].forEach(k=>localStorage.removeItem(k))}catch(err){}setTimeout(()=>location.reload(),150);return}
  if(a==='notes')return notesSheet();
  if(a==='tday'){S.dayOff=+v;return render()}
  if(a==='happen')return happeningSheet(+v);
@@ -1563,7 +1563,7 @@ document.addEventListener('click',e=>{
  if(a==='visit')return visitSheet();
  if(a==='join'){closeSheet();OB={step:1,err:''};return renderOb()}
  if(a==='signin'){closeSheet();OB={step:'si',err:''};return renderOb()}
- if(a==='signout'){if(API&&TOKEN){clearTimeout(syncT);api('state',{method:'PUT',body:{state:memberState()}}).finally(()=>api('logout',{method:'POST'}).catch(()=>{}).finally(()=>setToken(null)))}clearMember();closeSheet();go('home');return toast('Signed out. You can still browse and buy tickets.')}
+ if(a==='signout'){try{localStorage.setItem('rt-noauto','1')}catch(err){}if(API&&TOKEN){clearTimeout(syncT);api('state',{method:'PUT',body:{state:memberState()}}).finally(()=>api('logout',{method:'POST'}).catch(()=>{}).finally(()=>setToken(null)))}clearMember();closeSheet();go('home');return toast('Signed out. You can still browse and buy tickets.')}
  if(a==='delacct'){if(!el.classList.contains('arm')){el.classList.add('arm');el.textContent='Tap again to permanently delete';return}
   api('account',{method:'DELETE'}).then(r=>{if(!r.ok)return toast(r.message||'We couldn’t delete the account. Try again.');setToken(null);clearMember();closeSheet();go('home');toast('Your account was deleted.')}).catch(()=>toast('We can’t reach Rollertown right now.'));return}
  if(a==='profile')return profileSheet();
@@ -1680,8 +1680,13 @@ function render(){
  renderChrome();
  $('#app').innerHTML=S.mode==='staff'?vStaff():({home:vHome,menu:vMenu,events:vEvents,rewards:vRewards,book:vBook}[S.tab])();
 }
+/* demo: open already signed in to the public demo account (Jordan Avery) */
+const DEMO_LOGIN={email:'demo@rollertown.app',password:'rollertown'};
+function autoDemo(){try{return localStorage.getItem('rt-noauto')!=='1'}catch(e){return true}}
+if(autoDemo()){try{localStorage.setItem('rt-onboarded','1')}catch(e){}if(!API){S.account=true;saveLocal()}}
 render();
 if(!obDone())renderOb();
+if(API&&!TOKEN&&autoDemo())api('login',{method:'POST',body:DEMO_LOGIN}).then(r=>{if(r.ok){setToken(r.token);applyMember(r.member);render()}else renderOb()}).catch(()=>renderOb());
 if(API&&TOKEN)api('me').then(r=>{if(r.ok){applyMember(r.member);if(!$('#sheetRoot').innerHTML)render()}else if(r.status===401)signedOutByServer()}).catch(()=>{});
 </script>
 </body>
