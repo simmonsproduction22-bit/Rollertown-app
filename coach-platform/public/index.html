@@ -347,13 +347,18 @@ async function coachPage(slug) {
   let pub, me = null;
 
   app.innerHTML = `<div class="wrap"><p class="muted" style="margin-top:40px">Loading…</p></div>`;
-  try { pub = await api("GET", `/c/${slug}`); }
+  const offerToken = new URLSearchParams(location.search).get("offer") || store.get("offer:" + slug) || "";
+  try { pub = await api("GET", `/c/${slug}${offerToken ? "?offer=" + encodeURIComponent(offerToken) : ""}`); }
   catch (e) {
     app.innerHTML = `<div class="wrap auth"><div class="card"><h2>Page not found</h2><p class="muted">There's no coach at this address.</p><a href="/">Go home</a></div></div>`;
     return;
   }
   const coach = pub.coach, tz = coach.timezone;
   document.title = `${coach.name} · Lessons`;
+  // Remember an offer link across sign-up and the Stripe round trip; forget it once it's gone.
+  store.set("offer:" + slug, pub.offer ? offerToken : null);
+  const allPkgs = [...pub.packages, ...(pub.offer ? [pub.offer] : [])];
+  const groupLabel = (n) => `Group of ${n}`;
 
   async function loadMe() {
     if (!token) { me = null; return; }
@@ -363,10 +368,11 @@ async function coachPage(slug) {
 
   // Back from Stripe Checkout.
   const params = new URLSearchParams(location.search);
-  let notice = "";
+  let notice = "", justPaid = false;
   if (params.get("paid") && token) {
     try {
       const r = await api("POST", `/c/${slug}/purchases/${encodeURIComponent(params.get("paid"))}/confirm`, {}, token);
+      justPaid = r.paid;
       notice = r.paid ? `<div class="banner ok">Payment received. Your lessons are ready to book.</div>`
         : `<div class="banner">We haven't seen the payment go through yet. Refresh in a minute.</div>`;
     } catch {}
@@ -378,10 +384,28 @@ async function coachPage(slug) {
 
   await loadMe();
   draw();
+  if (justPaid && me?.creditsRemaining) bookSheet();
+
+  function pkgCard(p, offer) {
+    const each = p.lessonCount > 1 ? ` · ${money(Math.round(p.priceCents / p.lessonCount))} each` : "";
+    return `<div class="card pkg" ${offer ? 'style="border-color:var(--accent)"' : ""}>
+      ${offer ? `<span class="pill accent" style="align-self:flex-start;margin-bottom:8px">Custom offer for you</span>` : ""}
+      <h3>${esc(p.name)}</h3>
+      ${p.kind === "group"
+        ? `<div class="price">${money(p.priceCents)} <span class="muted" style="font-size:15px;font-weight:500">per person</span></div>
+           <p class="muted small">${p.minPeople}–${p.maxPeople} people · ${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""} · use within ${p.expiresDays} days</p>`
+        : `<div class="price">${money(p.priceCents)}</div>
+           <p class="muted small">${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""}${each} · use within ${p.expiresDays} days</p>`}
+      <p class="desc" style="white-space:pre-line">${esc(p.description)}</p>
+      <button class="primary block" data-act="buy" data-id="${p.id}" ${pub.paymentsReady ? "" : "disabled"}>${p.kind === "group" ? "Choose group size" : "Buy"}</button>
+    </div>`;
+  }
 
   function draw() {
     const upcoming = me ? me.lessons.filter((l) => l.status === "booked").sort((a, b) => a.startsAt.localeCompare(b.startsAt)) : [];
     const past = me ? me.lessons.filter((l) => l.status !== "booked").slice(0, 10) : [];
+    const privatePkgs = pub.packages.filter((p) => p.kind !== "group");
+    const groupPkgs = pub.packages.filter((p) => p.kind === "group");
     app.innerHTML = `
       <header class="top"><div class="wrap">
         <a class="brand" href="/${esc(slug)}">${esc(coach.name)}</a>
@@ -401,16 +425,17 @@ async function coachPage(slug) {
           <div class="card">
             <div class="row spread">
               <div><h2 style="margin:0">Your lessons</h2>
-                <p class="muted" style="margin:4px 0 0">${me.creditsRemaining
-                  ? `<strong style="color:var(--text)">${me.creditsRemaining}</strong> lesson${me.creditsRemaining === 1 ? "" : "s"} left to book`
-                  : "No lessons left to book"}${me.credits[0]?.expiresAt ? ` · use by ${fmtDate(me.credits[0].expiresAt, tz)}` : ""}</p></div>
+                ${me.credits.length ? me.credits.map((c) => `<p class="muted" style="margin:4px 0 0">
+                    <strong style="color:var(--text)">${c.remaining}</strong> ${c.kind === "group" ? `group lesson${c.remaining === 1 ? "" : "s"} (${c.partySize} people)` : `lesson${c.remaining === 1 ? "" : "s"}`} left
+                    · ${esc(c.packageName)}${c.expiresAt ? ` · use by ${fmtDate(c.expiresAt, tz)}` : ""}</p>`).join("")
+                  : `<p class="muted" style="margin:4px 0 0">No lessons left to book</p>`}</div>
               ${me.creditsRemaining ? `<button class="primary" data-act="book">Book a lesson</button>` : `<a class="btn primary" href="#packages">Buy lessons</a>`}
             </div>
           </div>
           <div class="list" style="margin-top:12px">
             ${upcoming.length ? upcoming.map((l) => `
               <div class="item">
-                <div class="grow"><div class="when">${fmtWhen(l.startsAt, tz)}</div><div class="muted small">${coach.lessonMinutes} min${l.note ? " · " + esc(l.note) : ""}</div></div>
+                <div class="grow"><div class="when">${fmtWhen(l.startsAt, tz)}</div><div class="muted small">${l.kind === "group" ? groupLabel(l.partySize) + " · " : ""}${coach.lessonMinutes} min${l.note ? " · " + esc(l.note) : ""}</div></div>
                 ${(Date.parse(l.startsAt) - Date.now()) / 3600e3 >= coach.cancelWindowHours ? `
                 <button class="sm" data-act="move" data-id="${l.id}">Reschedule</button>
                 <button class="sm danger" data-act="cancel" data-id="${l.id}">Cancel</button>`
@@ -421,17 +446,23 @@ async function coachPage(slug) {
             <div class="list" style="margin-top:8px">${past.map((l) => `<div class="item"><div class="grow">${fmtWhen(l.startsAt, tz)}</div>${statusPill(l.status)}</div>`).join("")}</div></details>` : ""}
         </section>` : ""}
 
+        ${pub.offer ? `<section class="section"><div class="grid">${pkgCard(pub.offer, true)}</div></section>` : ""}
+
         <section class="section" id="packages">
-          <h2>Lesson packages</h2>
-          ${pub.packages.length ? `<div class="grid">${pub.packages.map((p) => `
-            <div class="card pkg">
-              <h3>${esc(p.name)}</h3>
-              <div class="price">${money(p.priceCents)}</div>
-              <p class="muted small">${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""}${p.lessonCount > 1 ? ` · ${money(Math.round(p.priceCents / p.lessonCount))} each` : ""} · use within ${p.expiresDays} days</p>
-              <p class="desc">${esc(p.description)}</p>
-              <button class="primary block" data-act="buy" data-id="${p.id}" ${pub.paymentsReady ? "" : "disabled"}>Buy</button>
-            </div>`).join("")}</div>` : `<p class="muted">Packages coming soon.</p>`}
+          <h2>Private lessons</h2>
+          ${privatePkgs.length ? `<div class="grid">${privatePkgs.map((p) => pkgCard(p)).join("")}</div>` : `<p class="muted">Packages coming soon.</p>`}
+          ${groupPkgs.length ? `<h2 style="margin-top:28px">Small groups</h2>
+            <p class="muted">Bring your friends, family or team. One person books and pays for the group.</p>
+            <div class="grid">${groupPkgs.map((p) => pkgCard(p)).join("")}</div>` : ""}
           ${pub.paymentsReady ? `<p class="muted small" style="margin-top:12px">Secure card payment through Stripe.</p>` : `<p class="muted small" style="margin-top:12px">Online payment isn't turned on yet.</p>`}
+        </section>
+
+        <section class="section">
+          <h2>Corporate wellness</h2>
+          <div class="card">
+            <p>Sessions for your team, priced to fit your group and schedule.</p>
+            <button class="primary" data-act="quote">Request a quote</button>
+          </div>
         </section>
 
         ${coach.bio ? `<section class="section"><h2>About</h2><div class="card"><p style="white-space:pre-line;margin:0">${esc(coach.bio)}</p></div></section>` : ""}
@@ -457,9 +488,12 @@ async function coachPage(slug) {
       token = null; store.set(tokenKey, null); me = null; draw(); return;
     }
     if (act === "buy") {
-      if (!me) return authSheet(() => buy(id));
-      return buy(id);
+      const pkg = allPkgs.find((p) => p.id == id);
+      const go = () => (pkg.kind === "group" ? groupSheet(pkg) : buy(pkg));
+      if (!me) return authSheet(go);
+      return go();
     }
+    if (act === "quote") return quoteSheet();
     if (act === "book") return bookSheet();
     if (act === "move") return bookSheet(me.lessons.find((l) => l.id == id));
     if (act === "cancel") {
@@ -470,11 +504,51 @@ async function coachPage(slug) {
     }
   };
 
-  async function buy(packageId) {
+  async function buy(pkg, people) {
     try {
-      const r = await api("POST", `/c/${slug}/checkout`, { packageId: +packageId }, token);
+      const r = await api("POST", `/c/${slug}/checkout`, { packageId: pkg.id, people, offer: pkg.isOffer ? offerToken : undefined }, token);
       location.href = r.url;
     } catch (x) { toast(x.message); }
+  }
+
+  function groupSheet(pkg) {
+    const opts = [];
+    for (let n = pkg.minPeople; n <= pkg.maxPeople; n++) opts.push(n);
+    sheet(pkg.name, `
+      <p class="muted">${money(pkg.priceCents)} per person · ${pkg.lessonCount} lesson${pkg.lessonCount > 1 ? "s" : ""}. Count everyone in the group, including you.</p>
+      <label>How many people?</label>
+      <div class="slots" style="margin-top:4px">${opts.map((n) => `<button class="slot" data-n="${n}">${n}</button>`).join("")}</div>
+      <button class="primary block" data-go disabled style="margin-top:16px">Pick a group size</button>`,
+      (body) => {
+        const go = $("[data-go]", body); let people = 0;
+        body.addEventListener("click", (e) => {
+          const b = e.target.closest("[data-n]"); if (!b) return;
+          people = +b.dataset.n;
+          body.querySelectorAll("[data-n]").forEach((x) => x.classList.toggle("on", x === b));
+          go.disabled = false; go.textContent = `Pay ${money(pkg.priceCents * people)} for ${people} people`;
+        });
+        go.onclick = () => { go.disabled = true; buy(pkg, people); };
+      });
+  }
+
+  function quoteSheet() {
+    sheet("Corporate wellness", `<form>
+      <p class="muted">Tell ${esc(coach.name)} about your team and they'll follow up with a custom quote.</p>
+      <div class="fields">
+        <div class="field"><label for="q-name">Your name</label><input id="q-name" name="name" required autocomplete="name"></div>
+        <div class="field"><label for="q-company">Company</label><input id="q-company" name="company" autocomplete="organization"></div>
+        <div class="field"><label for="q-email">Work email</label><input id="q-email" name="email" type="email" required autocomplete="email"></div>
+        <div class="field"><label for="q-phone">Phone</label><input id="q-phone" name="phone" type="tel" autocomplete="tel"></div>
+      </div>
+      <div class="field"><label for="q-size">About how many people?</label><input id="q-size" name="groupSize" placeholder="e.g. 15"></div>
+      <div class="field"><label for="q-msg">What are you looking for?</label><textarea id="q-msg" name="message" placeholder="How often, where, any goals or dates"></textarea></div>
+      <input name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px">
+      <button class="primary block" type="submit">Send request</button><p class="err"></p></form>`, (body, close) => {
+      handleForm($("form", body), async (f) => {
+        await api("POST", `/c/${slug}/inquiries`, f);
+        close(); toast("Request sent. We'll be in touch.");
+      });
+    });
   }
 
   function authSheet(after) {
@@ -508,13 +582,27 @@ async function coachPage(slug) {
 
   function bookSheet(moving) {
     let pick = null;
+    // One choice per kind of lesson the client can book (private, or a group of N).
+    const choices = [];
+    if (!moving) for (const c of me.credits) {
+      const key = c.kind === "group" ? "g" + c.partySize : "p";
+      if (!choices.some((x) => x.key === key)) choices.push({ key, credit: c, label: c.kind === "group" ? groupLabel(c.partySize) : "Private lesson" });
+    }
+    let chosen = choices[0];
     sheet(moving ? "Reschedule lesson" : "Book a lesson", `
       ${moving ? `<p class="muted">Currently ${esc(fmtWhen(moving.startsAt, tz))}</p>` : ""}
+      ${choices.length > 1 ? `<label>Which lesson?</label><div class="row" style="margin-bottom:14px">${choices.map((c, i) =>
+        `<button class="slot ${i === 0 ? "on" : ""}" data-kind="${c.key}">${esc(c.label)}</button>`).join("")}</div>` : ""}
       <div data-picker></div>
       ${moving ? "" : `<div class="field" style="margin-top:14px"><label for="b-note">Anything to work on? (optional)</label><input id="b-note" maxlength="500"></div>`}
       <button class="primary block" data-go disabled style="margin-top:14px">Pick a time</button><p class="err"></p>`,
       (body, close) => {
         const go = $("[data-go]", body);
+        body.addEventListener("click", (e) => {
+          const k = e.target.closest("[data-kind]"); if (!k) return;
+          chosen = choices.find((c) => c.key === k.dataset.kind);
+          body.querySelectorAll("[data-kind]").forEach((x) => x.classList.toggle("on", x === k));
+        });
         slotPicker($("[data-picker]", body), tz, coach.maxDaysAhead,
           (from, days) => api("GET", `/c/${slug}/slots?from=${from}&days=${days}${moving ? "&exclude=" + moving.id : ""}`),
           (iso) => { pick = iso; go.disabled = false; go.textContent = `${moving ? "Move to" : "Book"} ${fmtWhen(iso, tz)}`; });
@@ -522,7 +610,7 @@ async function coachPage(slug) {
           go.disabled = true; $(".err", body).textContent = "";
           try {
             if (moving) await api("POST", `/c/${slug}/lessons/${moving.id}/reschedule`, { startsAt: pick }, token);
-            else await api("POST", `/c/${slug}/lessons`, { startsAt: pick, note: $("#b-note").value }, token);
+            else await api("POST", `/c/${slug}/lessons`, { startsAt: pick, note: $("#b-note").value, purchaseId: chosen?.credit.purchaseId }, token);
             close(); toast(moving ? "Lesson moved" : "Lesson booked"); await loadMe(); draw();
           } catch (x) { $(".err", body).textContent = x.message; go.disabled = false; }
         };
@@ -592,11 +680,13 @@ async function coachApp() {
     render();
   }
 
-  const TABS = [["schedule", "Schedule"], ["clients", "Clients"], ["money", "Money"], ["packages", "Packages"], ["availability", "Availability"], ["settings", "Settings"]];
+  const TABS = [["schedule", "Schedule"], ["clients", "Clients"], ["requests", "Requests"], ["money", "Money"], ["packages", "Packages"], ["availability", "Availability"], ["settings", "Settings"]];
+  const offerUrl = (pkg) => `${location.origin}/${d.coach.slug}?offer=${encodeURIComponent(pkg.offerToken)}`;
 
   function draw() {
     store.set("coach:tab", tab);
     const pageUrl = `${location.origin}/${d.coach.slug}`;
+    const newRequests = d.inquiries.filter((i) => i.status === "new").length;
     const setupSteps = [
       [d.packages.length > 0, "Add a lesson package", "packages"],
       [d.availability.length > 0, "Set your weekly hours", "availability"],
@@ -613,11 +703,11 @@ async function coachApp() {
           ${todo.map((s) => `<div class="row" style="margin-top:6px"><span>○</span><a href="#" data-tab="${s[2]}">${s[1]}</a></div>`).join("")}
           <p class="muted small" style="margin:10px 0 0">Your page: <a href="${esc(pageUrl)}" target="_blank" rel="noopener">${esc(pageUrl)}</a></p></div>` : ""}
         ${d.paymentsFake ? `<div class="banner" style="margin-top:16px">Demo mode: payments are simulated. No real money moves.</div>` : ""}
-        <nav class="tabs" role="tablist">${TABS.map(([k, l]) => `<button role="tab" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}" data-tab="${k}">${l}</button>`).join("")}</nav>
+        <nav class="tabs" role="tablist">${TABS.map(([k, l]) => `<button role="tab" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}" data-tab="${k}">${l}${k === "requests" && newRequests ? ` <span class="pill warn">${newRequests}</span>` : ""}</button>`).join("")}</nav>
         <div id="view"></div>
       </main>`;
     const v = $("#view");
-    ({ schedule: viewSchedule, clients: viewClients, money: viewMoney, packages: viewPackages, availability: viewAvailability, settings: viewSettings })[tab](v);
+    ({ schedule: viewSchedule, clients: viewClients, requests: viewRequests, money: viewMoney, packages: viewPackages, availability: viewAvailability, settings: viewSettings })[tab](v);
   }
 
   async function refresh() { await reload(); draw(); }
@@ -639,12 +729,19 @@ async function coachApp() {
       if (act === "client") return clientSheet(d.clients.find((c) => c.id == id));
       if (act === "add-client") return addClientSheet();
       if (act === "pkg") return packageSheet(id ? d.packages.find((p) => p.id == id) : null);
+      if (act === "pkg-offer") return packageSheet(null, { offer: true });
       if (act === "refund") return refund(d.purchases.find((p) => p.id == id));
       if (act === "keep") return keepBalance(d.purchases.find((p) => p.id == id));
       if (act === "connect") { b.disabled = true; const r = await api("POST", "/coach/stripe/connect", {}, token); location.href = r.url; return; }
       if (act === "stripe-dash") { const r = await api("GET", "/coach/stripe/dashboard", null, token); window.open(r.url, "_blank", "noopener"); return; }
       if (act === "send") { b.disabled = true; const r = await api("POST", "/coach/releases/send", {}, token); toast(r.waiting ? "Connect payouts first" : `${r.sent} sent${r.failed ? `, ${r.failed} failed` : ""}`); return refresh(); }
       if (act === "del-off") { await api("DELETE", `/coach/time-off/${id}`, null, token); return refresh(); }
+      if (act === "starter") { b.disabled = true; await api("POST", "/coach/starter-packages", {}, token); toast("Packages added. Edit any of them to fit."); return refresh(); }
+      if (act === "inq") { await api("PUT", `/coach/inquiries/${id}`, { status: b.dataset.status }, token); return refresh(); }
+      if (act === "offer-for") {
+        const i = d.inquiries.find((x) => x.id == id);
+        return packageSheet(null, { offer: true, offerFor: i.company || i.name, name: `${i.company || i.name} Wellness`, inquiry: i });
+      }
       if (act === "copy") { navigator.clipboard?.writeText(b.dataset.text); toast("Link copied"); return; }
     } catch (x) { toast(x.message); b.disabled = false; }
   };
@@ -653,7 +750,7 @@ async function coachApp() {
   function lessonRow(l, closing) {
     return `<div class="item">
       <div class="grow"><div class="when">${fmtWhen(l.startsAt, tz())}</div>
-        <div class="muted small"><a href="#" data-act="client" data-id="${l.clientId}">${esc(l.clientName)}</a>${l.note ? " · " + esc(l.note) : ""}</div></div>
+        <div class="muted small"><a href="#" data-act="client" data-id="${l.clientId}">${esc(l.clientName)}</a>${l.kind === "group" ? ` · <span class="pill accent">Group of ${l.partySize}</span>` : ""}${l.note ? " · " + esc(l.note) : ""}</div></div>
       ${closing ? `
         <button class="sm primary" data-act="close" data-status="completed" data-id="${l.id}">Done</button>
         <button class="sm" data-act="close" data-status="no_show" data-id="${l.id}">No-show</button>
@@ -783,12 +880,23 @@ async function coachApp() {
     if (!d.packages.length) return toast("Create a package first.");
     sheet("Package paid in person", `<form>
       <p class="muted">For cash, Zelle or Venmo. ${esc(c.name)} gets the lessons; nothing is held since you already have the money.</p>
-      <div class="field"><label for="op-pkg">Package</label><select id="op-pkg" name="packageId">${d.packages.map((p) => `<option value="${p.id}" data-price="${p.priceCents}">${esc(p.name)}: ${p.lessonCount} lessons, ${money(p.priceCents)}</option>`).join("")}</select></div>
-      <div class="field"><label for="op-amt">Amount received ($)</label><input id="op-amt" name="amount" type="number" min="0" step="0.01" value="${(d.packages[0].priceCents / 100).toFixed(2)}"></div>
+      <div class="field"><label for="op-pkg">Package</label><select id="op-pkg" name="packageId">${d.packages.map((p) => `<option value="${p.id}">${esc(p.name)}: ${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""}, ${money(p.priceCents)}${p.kind === "group" ? " per person" : ""}</option>`).join("")}</select></div>
+      <div class="field" id="op-ppl-f"><label for="op-ppl">People in the group</label><input id="op-ppl" name="people" type="number"></div>
+      <div class="field"><label for="op-amt">Amount received ($)</label><input id="op-amt" name="amount" type="number" min="0" step="0.01"></div>
       <button class="primary block" type="submit">Add package</button><p class="err"></p></form>`, (body, close) => {
-      $("#op-pkg").onchange = (e) => { $("#op-amt").value = (e.target.selectedOptions[0].dataset.price / 100).toFixed(2); };
+      const sync = (resetPeople) => {
+        const pkg = d.packages.find((p) => p.id == $("#op-pkg").value);
+        const isGroup = pkg.kind === "group";
+        $("#op-ppl-f").classList.toggle("hidden", !isGroup);
+        if (resetPeople) Object.assign($("#op-ppl"), { min: pkg.minPeople, max: pkg.maxPeople, value: pkg.minPeople });
+        const people = isGroup ? +$("#op-ppl").value || pkg.minPeople : 1;
+        $("#op-amt").value = (pkg.priceCents * people / 100).toFixed(2);
+      };
+      $("#op-pkg").onchange = () => sync(true);
+      $("#op-ppl").oninput = () => sync(false);
+      sync(true);
       handleForm($("form", body), async (f) => {
-        await api("POST", "/coach/purchases/offline", { clientId: c.id, packageId: +f.packageId, amountCents: Math.round(parseFloat(f.amount) * 100) }, token);
+        await api("POST", "/coach/purchases/offline", { clientId: c.id, packageId: +f.packageId, people: f.people ? +f.people : undefined, amountCents: Math.round(parseFloat(f.amount) * 100) }, token);
         close(); toast("Package added"); refresh();
       });
     });
@@ -859,36 +967,101 @@ async function coachApp() {
     catch (x) { toast(x.message); }
   }
 
+  // ---------- Requests (corporate wellness quotes) ----------
+  function viewRequests(v) {
+    const label = { new: ["New", "warn"], replied: ["Replied", "ok"], closed: ["Closed", ""] };
+    v.innerHTML = `<div class="row spread" style="margin-bottom:12px"><h2 style="margin:0">Quote requests</h2>
+        <button class="sm" data-act="pkg-offer">New private offer</button></div>
+      <p class="muted small">From the Corporate wellness form on your page. Reply by email, then send a private offer link they can pay online.</p>
+      <div class="list">${d.inquiries.length ? d.inquiries.map((i) => `
+        <div class="item" style="align-items:flex-start">
+          <div class="grow">
+            <div class="when">${esc(i.name)}${i.company ? ` · ${esc(i.company)}` : ""} <span class="pill ${label[i.status][1]}">${label[i.status][0]}</span></div>
+            <div class="muted small"><a href="mailto:${esc(i.email)}">${esc(i.email)}</a>${i.phone ? ` · <a href="tel:${esc(i.phone)}">${esc(i.phone)}</a>` : ""}${i.groupSize ? ` · about ${esc(i.groupSize)} people` : ""} · ${fmtDate(i.createdAt, tz())}</div>
+            ${i.message ? `<p style="margin:8px 0 0;white-space:pre-line">${esc(i.message)}</p>` : ""}
+            <div class="row" style="margin-top:10px">
+              <button class="sm primary" data-act="offer-for" data-id="${i.id}">Create offer</button>
+              ${i.status === "new" ? `<button class="sm" data-act="inq" data-status="replied" data-id="${i.id}">Mark replied</button>` : ""}
+              ${i.status !== "closed" ? `<button class="sm ghost" data-act="inq" data-status="closed" data-id="${i.id}">Close</button>` : `<button class="sm ghost" data-act="inq" data-status="new" data-id="${i.id}">Reopen</button>`}
+            </div>
+          </div>
+        </div>`).join("") : `<div class="empty">No requests yet. They show up here when a company fills in the Corporate wellness form.</div>`}</div>`;
+  }
+
+  function offerLinkSheet(pkg, inquiry) {
+    const url = offerUrl(pkg);
+    const subject = `${pkg.name}: your quote`;
+    const bodyText = `Hi ${inquiry ? inquiry.name.split(" ")[0] : ""},\n\nHere's your custom package: ${pkg.name}, ${pkg.lessonCount} session${pkg.lessonCount > 1 ? "s" : ""} for ${money(pkg.priceCents)}${pkg.kind === "group" ? " per person" : ""}.\n\nYou can review it and pay securely here:\n${url}\n\nThanks,\n${d.coach.name}`;
+    sheet("Offer ready", `
+      <p>Send this link to ${inquiry ? esc(inquiry.name) : "your client"}. Only people with the link can see the offer.</p>
+      <input readonly value="${esc(url)}" onclick="this.select()" style="margin-bottom:12px">
+      <div class="row">
+        <button class="primary" data-act="copy" data-text="${esc(url)}">Copy link</button>
+        ${inquiry ? `<a class="btn" href="mailto:${esc(inquiry.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}">Email it</a>` : ""}
+      </div>`, (body) => {
+      $("[data-act=copy]", body).onclick = () => { navigator.clipboard?.writeText(url); toast("Link copied"); };
+    });
+  }
+
   // ---------- Packages ----------
   function viewPackages(v) {
-    v.innerHTML = `<div class="row spread" style="margin-bottom:12px"><h2 style="margin:0">Packages</h2><button class="sm primary" data-act="pkg">New package</button></div>
-      ${d.packages.length ? `<div class="grid">${d.packages.map((p) => `
+    const card = (p) => `
         <div class="card pkg" style="${p.active ? "" : "opacity:.6"}">
           <div class="row spread"><h3 style="margin:0">${esc(p.name)}</h3>${p.active ? "" : `<span class="pill">Hidden</span>`}</div>
-          <div class="price">${money(p.priceCents)}</div>
-          <p class="muted small">${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""} · ${money(Math.floor(p.priceCents / p.lessonCount))} released per lesson · ${p.expiresDays}-day use-by</p>
-          <p class="desc small">${esc(p.description)}</p>
-          <button class="sm" data-act="pkg" data-id="${p.id}">Edit</button>
-        </div>`).join("")}</div>` : `<div class="list"><div class="empty">Create your first package, like "4 lessons for $200".</div></div>`}
+          ${p.isOffer ? `<div><span class="pill accent">Private offer${p.offerFor ? " · " + esc(p.offerFor) : ""}</span></div>` : ""}
+          <div class="price">${money(p.priceCents)}${p.kind === "group" ? ` <span class="muted" style="font-size:15px;font-weight:500">per person</span>` : ""}</div>
+          <p class="muted small">${p.kind === "group" ? `${p.minPeople}–${p.maxPeople} people · ` : ""}${p.lessonCount} lesson${p.lessonCount > 1 ? "s" : ""}${p.kind === "group" ? "" : ` · ${money(Math.floor(p.priceCents / p.lessonCount))} per lesson`} · ${p.expiresDays}-day use-by</p>
+          <p class="desc small" style="white-space:pre-line">${esc(p.description)}</p>
+          <div class="row"><button class="sm" data-act="pkg" data-id="${p.id}">Edit</button>
+          ${p.isOffer ? `<button class="sm" data-act="copy" data-text="${esc(offerUrl(p))}">Copy offer link</button>` : ""}</div>
+        </div>`;
+    const pub = d.packages.filter((p) => !p.isOffer), offers = d.packages.filter((p) => p.isOffer);
+    v.innerHTML = `<div class="row spread" style="margin-bottom:12px"><h2 style="margin:0">Packages</h2><button class="sm primary" data-act="pkg">New package</button></div>
+      ${pub.length ? `<div class="grid">${pub.map(card).join("")}</div>` : `<div class="card"><h3>Start with your pricing</h3>
+        <p class="muted">Adds Single $125, 5-Pack $575 ($115 each), 10-Pack $1,000 ($100 each), and Small Group at $50 per person for 3–6 people. You can edit any of them.</p>
+        <button class="primary" data-act="starter">Add these packages</button></div>`}
+      ${offers.length ? `<h2 style="margin-top:28px">Private offers</h2><p class="muted small">Only people with the link can see and buy these.</p><div class="grid">${offers.map(card).join("")}</div>` : ""}
       <p class="muted small" style="margin-top:14px">Keep use-by at 90 days or less: Stripe can only hold card payments for a limited time.</p>`;
   }
 
-  function packageSheet(p) {
-    sheet(p ? "Edit package" : "New package", `<form>
-      <div class="field"><label for="pk-name">Name</label><input id="pk-name" name="name" required value="${esc(p?.name || "")}" placeholder="4-Lesson Pack"></div>
+  function packageSheet(p, preset = {}) {
+    const isOffer = p ? p.isOffer : Boolean(preset.offer);
+    const kind = p?.kind || "private";
+    sheet(p ? "Edit package" : isOffer ? "New private offer" : "New package", `<form>
+      ${isOffer ? `<p class="muted small">A private offer doesn't show on your page. You send the link to the client, and only they can buy it.</p>` : ""}
+      ${preset.inquiry ? `<div class="banner info small">${esc(preset.inquiry.name)}${preset.inquiry.company ? ", " + esc(preset.inquiry.company) : ""}${preset.inquiry.groupSize ? " · about " + esc(preset.inquiry.groupSize) + " people" : ""}</div>` : ""}
+      <div class="field"><label for="pk-name">Name</label><input id="pk-name" name="name" required value="${esc(p?.name || preset.name || "")}" placeholder="5-Lesson Pack"></div>
+      ${isOffer ? `<div class="field"><label for="pk-for">Who it's for (only you see this)</label><input id="pk-for" name="offerFor" value="${esc(p?.offerFor || preset.offerFor || "")}" placeholder="Acme Corp"></div>` : ""}
+      <div class="field"><label for="pk-kind">Type</label><select id="pk-kind" name="kind">
+        <option value="private" ${kind === "private" ? "selected" : ""}>Private lessons: one price for the package</option>
+        <option value="group" ${kind === "group" ? "selected" : ""}>Small group: price is per person</option></select></div>
+      <div class="fields" id="pk-group" ${kind === "group" ? "" : 'style="display:none"'}>
+        <div class="field"><label for="pk-min">Min people</label><input id="pk-min" name="minPeople" type="number" min="2" max="100" value="${p?.kind === "group" ? p.minPeople : 3}"></div>
+        <div class="field"><label for="pk-max">Max people</label><input id="pk-max" name="maxPeople" type="number" min="2" max="100" value="${p?.kind === "group" ? p.maxPeople : 6}"></div>
+      </div>
       <div class="fields">
-        <div class="field"><label for="pk-n">Lessons</label><input id="pk-n" name="lessonCount" type="number" min="1" max="100" required value="${p?.lessonCount || 4}"></div>
-        <div class="field"><label for="pk-price">Price ($)</label><input id="pk-price" name="price" type="number" min="1" step="0.01" required value="${p ? (p.priceCents / 100).toFixed(2) : ""}"></div>
+        <div class="field"><label for="pk-n">Lessons</label><input id="pk-n" name="lessonCount" type="number" min="1" max="100" required value="${p?.lessonCount || (isOffer ? 4 : 5)}"></div>
+        <div class="field"><label for="pk-price" id="pk-price-l">${kind === "group" ? "Price per person ($)" : "Total price ($)"}</label><input id="pk-price" name="price" type="number" min="1" step="0.01" required value="${p ? (p.priceCents / 100).toFixed(2) : ""}"></div>
         <div class="field"><label for="pk-exp">Use within (days)</label><input id="pk-exp" name="expiresDays" type="number" min="7" max="365" required value="${p?.expiresDays || 90}"></div>
       </div>
       <div class="field"><label for="pk-desc">Description</label><textarea id="pk-desc" name="description" maxlength="1000">${esc(p?.description || "")}</textarea></div>
       ${p ? `<div class="field"><label><input type="checkbox" name="active" ${p.active ? "checked" : ""} style="width:auto"> Show on my page</label></div>` : ""}
       <p class="muted small">Changes apply to new purchases only. Packages already bought keep their original terms.</p>
-      <button class="primary block" type="submit">${p ? "Save" : "Create package"}</button><p class="err"></p></form>`, (body, close) => {
+      <button class="primary block" type="submit">${p ? "Save" : isOffer ? "Create offer" : "Create package"}</button><p class="err"></p></form>`, (body, close) => {
+      $("#pk-kind").onchange = (e) => {
+        const g = e.target.value === "group";
+        $("#pk-group").style.display = g ? "" : "none";
+        $("#pk-price-l").textContent = g ? "Price per person ($)" : "Total price ($)";
+      };
       handleForm($("form", body), async (f) => {
-        const payload = { name: f.name, description: f.description, lessonCount: +f.lessonCount, priceCents: Math.round(parseFloat(f.price) * 100), expiresDays: +f.expiresDays, active: p ? f.active === "on" : true, sortOrder: p?.sortOrder || 0 };
-        await api(p ? "PUT" : "POST", p ? `/coach/packages/${p.id}` : "/coach/packages", payload, token);
-        close(); toast("Package saved"); refresh();
+        const payload = { name: f.name, description: f.description, lessonCount: +f.lessonCount, priceCents: Math.round(parseFloat(f.price) * 100),
+          expiresDays: +f.expiresDays, active: p ? f.active === "on" : true, sortOrder: p?.sortOrder || 0,
+          kind: f.kind, minPeople: +f.minPeople, maxPeople: +f.maxPeople, offer: isOffer, offerFor: f.offerFor };
+        const r = await api(p ? "PUT" : "POST", p ? `/coach/packages/${p.id}` : "/coach/packages", payload, token);
+        if (preset.inquiry) await api("PUT", `/coach/inquiries/${preset.inquiry.id}`, { status: "replied" }, token);
+        close(); await refresh();
+        if (!p && isOffer) offerLinkSheet(r.package, preset.inquiry);
+        else toast("Package saved");
       });
     });
   }

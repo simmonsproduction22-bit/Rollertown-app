@@ -127,7 +127,7 @@ export async function confirmPurchase(purchaseId: number): Promise<boolean> {
 /** Lesson credits a client can still book, per purchase (oldest expiring first). */
 export async function openCredits(t: Q, clientId: number) {
   return t(
-    `SELECT p.id, p.package_name, p.lessons_total, p.expires_at,
+    `SELECT p.id, p.package_name, p.package_kind, p.party_size, p.lessons_total, p.expires_at,
             p.lessons_total - COUNT(l.id) FILTER (WHERE l.status = ANY($2))::int AS remaining
      FROM purchases p LEFT JOIN lessons l ON l.purchase_id = p.id
      WHERE p.client_id = $1 AND p.status = 'paid' AND (p.expires_at IS NULL OR p.expires_at > NOW())

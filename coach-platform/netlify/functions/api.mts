@@ -12,6 +12,7 @@ import {
 } from "../../src/money.ts";
 import { payments, paymentsConfigured } from "../../src/payments.ts";
 import { localDate, openSlots, validTimeZone, type Busy } from "../../src/time.ts";
+import { randomBytes } from "node:crypto";
 
 // ---------- helpers ----------
 
@@ -39,24 +40,42 @@ function publicCoach(c: any) {
     minNoticeHours: c.min_notice_hours, maxDaysAhead: c.max_days_ahead,
   };
 }
-function pkgOut(p: any) {
+function pkgOut(p: any, forCoach = false) {
   return {
     id: p.id, name: p.name, description: p.description, lessonCount: p.lesson_count, priceCents: p.price_cents,
     expiresDays: p.expires_days, active: p.active, sortOrder: p.sort_order,
+    kind: p.kind, minPeople: p.min_people, maxPeople: p.max_people, isOffer: Boolean(p.offer_token),
+    ...(forCoach ? { offerToken: p.offer_token, offerFor: p.offer_for } : {}),
   };
+}
+
+/** What a client pays for a package: group prices are per person. */
+function packageTotal(pkg: any, people: number) {
+  return pkg.kind === "group" ? pkg.price_cents * people : pkg.price_cents;
+}
+function partySize(pkg: any, requested: unknown): number {
+  if (pkg.kind !== "group") return 1;
+  const n = int(requested);
+  if (!(n >= pkg.min_people && n <= pkg.max_people)) {
+    throw new UserError(`Group lessons are for ${pkg.min_people} to ${pkg.max_people} people.`);
+  }
+  return n;
 }
 function lessonOut(l: any) {
   return {
     id: l.id, startsAt: l.starts_at, endsAt: l.ends_at, status: l.status, note: l.client_note,
     purchaseId: l.purchase_id, clientId: l.client_id, clientName: l.client_name,
     releaseStatus: l.release_status ?? null,
+    kind: l.package_kind ?? "private", partySize: l.party_size ?? 1,
   };
 }
+const LESSON_COLS = `l.*, p.package_kind, p.party_size`;
 function purchaseOut(p: any) {
   return {
     id: p.id, clientId: p.client_id, clientName: p.client_name, packageName: p.package_name,
     lessonsTotal: p.lessons_total, lessonsUsed: p.lessons_used ?? null, amountCents: p.amount_cents,
     method: p.method, status: p.status, releasedCents: p.released_cents, refundedCents: p.refunded_cents,
+    kind: p.package_kind, partySize: p.party_size,
     heldCents: p.method === "card" && p.status === "paid" ? p.amount_cents - p.released_cents - p.refunded_cents : 0,
     paidAt: p.paid_at, expiresAt: p.expires_at, createdAt: p.created_at,
   };
@@ -103,11 +122,11 @@ async function assertBookable(t: Q, coach: any, start: number, excludeLessonId: 
   if (!open.includes(start)) throw new UserError("That time was just taken or isn't available. Pick another.", 409);
 }
 
-async function bookLesson(coach: any, clientId: number, start: number, note: string, asCoach: boolean) {
+async function bookLesson(coach: any, clientId: number, start: number, note: string, asCoach: boolean, purchaseId = 0) {
   return tx(async (t) => {
     await t(`SELECT pg_advisory_xact_lock($1)`, [coach.id]);        // one booking at a time per coach
     await assertBookable(t, coach, start, 0, asCoach);
-    const credits = await openCredits(t, clientId);
+    const credits = (await openCredits(t, clientId)).filter((c) => !purchaseId || c.id === purchaseId);
     const credit = credits.find((c) => !c.expires_at || +new Date(c.expires_at) > start);
     if (!credit) {
       throw new UserError(credits.length
@@ -118,7 +137,7 @@ async function bookLesson(coach: any, clientId: number, start: number, note: str
       `INSERT INTO lessons (coach_id, client_id, purchase_id, starts_at, ends_at, client_note)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [coach.id, clientId, credit.id, new Date(start), new Date(start + coach.lesson_minutes * 60_000), note]);
-    return l;
+    return { ...l, package_kind: credit.package_kind, party_size: credit.party_size };
   });
 }
 
@@ -133,8 +152,33 @@ async function clientRoutes(req: Request, slug: string, parts: string[]): Promis
   const m = req.method;
 
   if (m === "GET" && !a) {
-    const pkgs = await q(`SELECT * FROM packages WHERE coach_id = $1 AND active ORDER BY sort_order, price_cents`, [coach.id]);
-    return json({ coach: publicCoach(coach), packages: pkgs.map(pkgOut), paymentsReady: paymentsConfigured() });
+    const pkgs = await q(
+      `SELECT * FROM packages WHERE coach_id = $1 AND active AND offer_token IS NULL ORDER BY sort_order, price_cents`, [coach.id]);
+    const token = new URL(req.url).searchParams.get("offer");
+    const [offer] = token
+      ? await q(`SELECT * FROM packages WHERE coach_id = $1 AND active AND offer_token = $2`, [coach.id, token.slice(0, 100)])
+      : [];
+    return json({
+      coach: publicCoach(coach), packages: pkgs.map((p) => pkgOut(p)),
+      offer: offer ? pkgOut(offer) : null, paymentsReady: paymentsConfigured(),
+    });
+  }
+
+  if (m === "POST" && a === "inquiries") {
+    const d = await body(req);
+    if (str(d.website)) return json({ ok: true });            // honeypot: bots fill every field
+    const name = str(d.name, 80), email = normEmail(d.email);
+    if (!name) return fail(400, "Add your name.");
+    if (!validEmail(email)) return fail(400, "Enter a valid email address.");
+    const [{ n }] = await q(
+      `SELECT COUNT(*)::int AS n FROM inquiries WHERE coach_id = $1 AND email = $2 AND created_at > NOW() - INTERVAL '1 day'`,
+      [coach.id, email]);
+    if (n >= 3) return fail(429, "We already have your request. We'll be in touch soon.");
+    await q(
+      `INSERT INTO inquiries (coach_id, kind, name, email, phone, company, group_size, message)
+       VALUES ($1, 'corporate', $2, $3, $4, $5, $6, $7)`,
+      [coach.id, name, email, str(d.phone, 30), str(d.company, 120), str(d.groupSize, 60), str(d.message, 3000)]);
+    return json({ ok: true }, 201);
   }
 
   if (m === "GET" && a === "slots") {
@@ -178,15 +222,19 @@ async function clientRoutes(req: Request, slug: string, parts: string[]): Promis
   if (m === "GET" && a === "me") {
     const credits = await openCredits(q, client.id);
     const lessons = await q(
-      `SELECT * FROM lessons WHERE client_id = $1 AND (status = 'booked' OR starts_at > NOW() - INTERVAL '120 days')
-       ORDER BY starts_at DESC LIMIT 100`, [client.id]);
+      `SELECT ${LESSON_COLS} FROM lessons l JOIN purchases p ON p.id = l.purchase_id
+       WHERE l.client_id = $1 AND (l.status = 'booked' OR l.starts_at > NOW() - INTERVAL '120 days')
+       ORDER BY l.starts_at DESC LIMIT 100`, [client.id]);
     const purchases = await q(
       `SELECT p.*, (SELECT COUNT(*)::int FROM lessons l WHERE l.purchase_id = p.id AND l.status <> 'canceled') AS lessons_used
        FROM purchases p WHERE client_id = $1 AND status IN ('paid', 'refunded') ORDER BY created_at DESC`, [client.id]);
     return json({
       client: { name: client.name, email: client.email, phone: client.phone },
       creditsRemaining: credits.reduce((s, c) => s + c.remaining, 0),
-      credits: credits.map((c) => ({ purchaseId: c.id, packageName: c.package_name, remaining: c.remaining, expiresAt: c.expires_at })),
+      credits: credits.map((c) => ({
+        purchaseId: c.id, packageName: c.package_name, remaining: c.remaining, expiresAt: c.expires_at,
+        kind: c.package_kind, partySize: c.party_size,
+      })),
       lessons: lessons.map(lessonOut),
       purchases: purchases.map((p) => ({ ...purchaseOut(p), heldCents: undefined, releasedCents: undefined })),
     });
@@ -194,19 +242,25 @@ async function clientRoutes(req: Request, slug: string, parts: string[]): Promis
 
   if (m === "POST" && a === "checkout") {
     const d = await body(req);
-    const [pkg] = await q(`SELECT * FROM packages WHERE id = $1 AND coach_id = $2 AND active`, [int(d.packageId), coach.id]);
+    const [pkg] = await q(
+      `SELECT * FROM packages WHERE id = $1 AND coach_id = $2 AND active AND (offer_token IS NULL OR offer_token = $3)`,
+      [int(d.packageId), coach.id, str(d.offer, 100)]);
     if (!pkg) return fail(404, "That package isn't available.");
     if (!paymentsConfigured()) return fail(503, "Online payments aren't turned on yet. Contact your coach.");
+    const people = partySize(pkg, d.people);
+    const total = packageTotal(pkg, people);
     const [p] = await q(
-      `INSERT INTO purchases (coach_id, client_id, package_id, package_name, lessons_total, amount_cents, method)
-       VALUES ($1, $2, $3, $4, $5, $6, 'card') RETURNING id`,
-      [coach.id, client.id, pkg.id, pkg.name, pkg.lesson_count, pkg.price_cents]);
+      `INSERT INTO purchases (coach_id, client_id, package_id, package_name, lessons_total, amount_cents, method, package_kind, party_size)
+       VALUES ($1, $2, $3, $4, $5, $6, 'card', $7, $8) RETURNING id`,
+      [coach.id, client.id, pkg.id, pkg.name, pkg.lesson_count, total, pkg.kind, people]);
     const base = `${origin(req)}/${coach.slug}`;
     try {
       const s = await payments().createCheckout({
-        purchaseId: p.id, coachId: coach.id, amountCents: pkg.price_cents,
+        purchaseId: p.id, coachId: coach.id, amountCents: total,
         name: `${pkg.name} with ${coach.name}`,
-        description: `${pkg.lesson_count} lesson${pkg.lesson_count > 1 ? "s" : ""} · use within ${pkg.expires_days} days`,
+        description: `${pkg.lesson_count} lesson${pkg.lesson_count > 1 ? "s" : ""}`
+          + (pkg.kind === "group" ? ` · group of ${people} at $${(pkg.price_cents / 100).toFixed(2)} per person` : "")
+          + ` · use within ${pkg.expires_days} days`,
         email: client.email,
         successUrl: `${base}?paid=${p.id}`,
         cancelUrl: `${base}?canceled=${p.id}`,
@@ -228,7 +282,7 @@ async function clientRoutes(req: Request, slug: string, parts: string[]): Promis
 
   if (m === "POST" && a === "lessons" && !b) {
     const d = await body(req);
-    const l = await bookLesson(coach, client.id, Date.parse(String(d.startsAt)), str(d.note, 500), false);
+    const l = await bookLesson(coach, client.id, Date.parse(String(d.startsAt)), str(d.note, 500), false, int(d.purchaseId) || 0);
     return json({ lesson: lessonOut(l) }, 201);
   }
 
@@ -276,8 +330,9 @@ async function coachDashboard(coach: any) {
                  AND created_at >= date_trunc('month', NOW() AT TIME ZONE $2) AT TIME ZONE $2), 0)::int AS offline_month`,
     [id, coach.timezone]);
   const lessons = await q(
-    `SELECT l.*, c.name AS client_name, r.status AS release_status FROM lessons l
-     JOIN clients c ON c.id = l.client_id LEFT JOIN releases r ON r.lesson_id = l.id
+    `SELECT ${LESSON_COLS}, c.name AS client_name, r.status AS release_status FROM lessons l
+     JOIN clients c ON c.id = l.client_id JOIN purchases p ON p.id = l.purchase_id
+     LEFT JOIN releases r ON r.lesson_id = l.id
      WHERE l.coach_id = $1 AND (l.status = 'booked' OR l.starts_at > NOW() - INTERVAL '30 days')
      ORDER BY l.starts_at`, [id]);
   const clients = await q(
@@ -302,6 +357,9 @@ async function coachDashboard(coach: any) {
   const packages = await q(`SELECT * FROM packages WHERE coach_id = $1 ORDER BY active DESC, sort_order, price_cents`, [id]);
   const availability = await q(`SELECT weekday, start_min, end_min FROM availability WHERE coach_id = $1 ORDER BY weekday, start_min`, [id]);
   const timeOff = await q(`SELECT * FROM time_off WHERE coach_id = $1 AND ends_at > NOW() ORDER BY starts_at`, [id]);
+  const inquiries = await q(
+    `SELECT * FROM inquiries WHERE coach_id = $1 AND (status <> 'closed' OR created_at > NOW() - INTERVAL '90 days')
+     ORDER BY (status = 'new') DESC, created_at DESC LIMIT 100`, [id]);
 
   return {
     coach: {
@@ -321,7 +379,11 @@ async function coachDashboard(coach: any) {
       id: r.id, kind: r.kind, clientName: r.client_name, packageName: r.package_name, lessonAt: r.lesson_at,
       amountCents: r.amount_cents, feeCents: r.fee_cents, status: r.status, error: r.error, createdAt: r.created_at, sentAt: r.sent_at,
     })),
-    packages: packages.map(pkgOut),
+    packages: packages.map((p) => pkgOut(p, true)),
+    inquiries: inquiries.map((i) => ({
+      id: i.id, name: i.name, email: i.email, phone: i.phone, company: i.company, groupSize: i.group_size,
+      message: i.message, status: i.status, createdAt: i.created_at,
+    })),
     availability: availability.map((w) => ({ weekday: w.weekday, startMin: w.start_min, endMin: w.end_min })),
     timeOff: timeOff.map((o) => ({ id: o.id, startsAt: o.starts_at, endsAt: o.ends_at, note: o.note })),
   };
@@ -432,24 +494,58 @@ async function coachRoutes(req: Request, parts: string[]): Promise<Response> {
   if ((m === "POST" || m === "PUT") && a === "packages") {
     const d = await body(req);
     const name = str(d.name, 80), lessons = int(d.lessonCount), price = int(d.priceCents), days = int(d.expiresDays ?? 90);
+    const kind = d.kind === "group" ? "group" : "private";
+    const minP = kind === "group" ? int(d.minPeople) : 1, maxP = kind === "group" ? int(d.maxPeople) : 1;
+    if (kind === "group" && !(minP >= 2 && maxP >= minP && maxP <= 100)) return fail(400, "Set a group size, like 3 to 6 people.");
+    const offerFor = str(d.offerFor, 120);
     if (!name) return fail(400, "Name the package.");
     if (!(lessons >= 1 && lessons <= 100)) return fail(400, "Lessons must be 1 to 100.");
     if (!(price >= 100)) return fail(400, "Price must be at least $1.");
     if (!(days >= 7 && days <= 365)) return fail(400, "Use-by must be 7 to 365 days.");
     if (m === "POST") {
+      const token = d.offer ? randomBytes(9).toString("base64url") : null;
       const [p] = await q(
-        `INSERT INTO packages (coach_id, name, description, lesson_count, price_cents, expires_days, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [coach.id, name, str(d.description, 1000), lessons, price, days, int(d.sortOrder) || 0]);
-      return json({ package: pkgOut(p) }, 201);
+        `INSERT INTO packages (coach_id, name, description, lesson_count, price_cents, expires_days, sort_order,
+           kind, min_people, max_people, offer_token, offer_for)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [coach.id, name, str(d.description, 1000), lessons, price, days, int(d.sortOrder) || 0, kind, minP, maxP, token, offerFor]);
+      return json({ package: pkgOut(p, true) }, 201);
     }
     // Editing changes the package for future buyers only; past purchases keep their own copy of the terms.
     const [p] = await q(
       `UPDATE packages SET name = $3, description = $4, lesson_count = $5, price_cents = $6, expires_days = $7,
-         active = $8, sort_order = $9 WHERE id = $1 AND coach_id = $2 RETURNING *`,
-      [int(b), coach.id, name, str(d.description, 1000), lessons, price, days, d.active !== false, int(d.sortOrder) || 0]);
+         active = $8, sort_order = $9, kind = $10, min_people = $11, max_people = $12, offer_for = $13
+       WHERE id = $1 AND coach_id = $2 RETURNING *`,
+      [int(b), coach.id, name, str(d.description, 1000), lessons, price, days, d.active !== false, int(d.sortOrder) || 0,
+       kind, minP, maxP, offerFor]);
     if (!p) return fail(404, "Package not found.");
-    return json({ package: pkgOut(p) });
+    return json({ package: pkgOut(p, true) });
+  }
+
+  if (m === "POST" && a === "starter-packages") {
+    // One-tap starting lineup: $125 single down to $100/lesson, plus $50/person small groups.
+    const [{ n }] = await q(`SELECT COUNT(*)::int AS n FROM packages WHERE coach_id = $1`, [coach.id]);
+    if (n > 0) return fail(409, "You already have packages.");
+    const starter: [string, string, number, number, string, number, number, number][] = [
+      ["Single Lesson", "One private lesson.", 1, 12500, "private", 1, 1, 10],
+      ["5-Lesson Pack", "Five private lessons at $115 each.", 5, 57500, "private", 1, 1, 20],
+      ["10-Lesson Pack", "Ten private lessons at $100 each. Best value.", 10, 100000, "private", 1, 1, 30],
+      ["Small Group Lesson", "Bring your crew: one lesson for a group of 3 to 6. Price is per person.", 1, 5000, "group", 3, 6, 40],
+    ];
+    for (const [name, desc, count, price, kind, minP, maxP, sort] of starter) {
+      await q(
+        `INSERT INTO packages (coach_id, name, description, lesson_count, price_cents, expires_days, sort_order, kind, min_people, max_people)
+         VALUES ($1, $2, $3, $4, $5, 90, $6, $7, $8, $9)`,
+        [coach.id, name, desc, count, price, sort, kind, minP, maxP]);
+    }
+    return json({ ok: true }, 201);
+  }
+
+  if (m === "PUT" && a === "inquiries") {
+    const d = await body(req);
+    const status = ["new", "replied", "closed"].includes(d.status) ? d.status : "replied";
+    await q(`UPDATE inquiries SET status = $3 WHERE id = $1 AND coach_id = $2`, [int(b), coach.id, status]);
+    return json({ ok: true });
   }
 
   if (m === "PUT" && a === "clients") {
@@ -487,12 +583,14 @@ async function coachRoutes(req: Request, parts: string[]): Promise<Response> {
     const [cl] = await q(`SELECT id FROM clients WHERE id = $1 AND coach_id = $2`, [int(d.clientId), coach.id]);
     const [pkg] = await q(`SELECT * FROM packages WHERE id = $1 AND coach_id = $2`, [int(d.packageId), coach.id]);
     if (!cl || !pkg) return fail(404, "Pick a client and a package.");
-    const amount = d.amountCents === undefined ? pkg.price_cents : int(d.amountCents);
+    const people = partySize(pkg, d.people ?? pkg.min_people);
+    const amount = d.amountCents === undefined ? packageTotal(pkg, people) : int(d.amountCents);
     if (!(amount >= 0)) return fail(400, "Enter the amount paid.");
     await q(
-      `INSERT INTO purchases (coach_id, client_id, package_id, package_name, lessons_total, amount_cents, method, status, paid_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'offline', 'paid', NOW(), NOW() + make_interval(days => $7))`,
-      [coach.id, cl.id, pkg.id, pkg.name, pkg.lesson_count, amount, pkg.expires_days]);
+      `INSERT INTO purchases (coach_id, client_id, package_id, package_name, lessons_total, amount_cents, method, status, paid_at, expires_at,
+         package_kind, party_size)
+       VALUES ($1, $2, $3, $4, $5, $6, 'offline', 'paid', NOW(), NOW() + make_interval(days => $7), $8, $9)`,
+      [coach.id, cl.id, pkg.id, pkg.name, pkg.lesson_count, amount, pkg.expires_days, pkg.kind, people]);
     return json({ ok: true }, 201);
   }
 
@@ -535,7 +633,7 @@ async function coachRoutes(req: Request, parts: string[]): Promise<Response> {
     const d = await body(req);
     const [cl] = await q(`SELECT id FROM clients WHERE id = $1 AND coach_id = $2`, [int(d.clientId), coach.id]);
     if (!cl) return fail(404, "Pick a client.");
-    const l = await bookLesson(coach, cl.id, Date.parse(String(d.startsAt)), str(d.note, 500), true);
+    const l = await bookLesson(coach, cl.id, Date.parse(String(d.startsAt)), str(d.note, 500), true, int(d.purchaseId) || 0);
     return json({ lesson: lessonOut(l) }, 201);
   }
 

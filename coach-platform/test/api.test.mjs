@@ -44,7 +44,7 @@ test("slots respect windows, notice and busy times", () => {
 });
 
 test("full flow: buy, book, reschedule, cancel, complete, release, refund", async () => {
-  await q(`TRUNCATE coaches, clients, sessions, packages, purchases, availability, time_off, lessons, releases RESTART IDENTITY CASCADE`);
+  await q(`TRUNCATE coaches, clients, sessions, packages, purchases, availability, time_off, lessons, releases, inquiries RESTART IDENTITY CASCADE`);
 
   // Owner signs up with no code; a second coach can't without one.
   const coach = ok(await call("POST", "/api/coach/signup", { name: "Sam Coach", email: "sam@example.com", slug: "sam", password: "longpassword1", timezone: "America/Chicago" }), 201).token;
@@ -142,3 +142,70 @@ test("full flow: buy, book, reschedule, cancel, complete, release, refund", asyn
 });
 
 
+
+test("groups, private offers, quote requests, starter packages", async () => {
+  await q(`TRUNCATE coaches, clients, sessions, packages, purchases, availability, time_off, lessons, releases, inquiries RESTART IDENTITY CASCADE`);
+  const coach = ok(await call("POST", "/api/coach/signup", { name: "Sam", email: "sam@example.com", slug: "sam", password: "longpassword1" }), 201).token;
+  ok(await call("PUT", "/api/coach/profile", { minNoticeHours: 0 }, coach));
+  ok(await call("PUT", "/api/coach/availability", { windows: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ weekday: d, startMin: 0, endMin: 1440 })) }, coach));
+
+  // Starter lineup: $125 single, $115 and $100 packs, $50/person group.
+  ok(await call("POST", "/api/coach/starter-packages", {}, coach), 201);
+  assert.equal((await call("POST", "/api/coach/starter-packages", {}, coach)).status, 409);
+  const pub = ok(await call("GET", "/api/c/sam"));
+  assert.deepEqual(pub.packages.map((p) => [p.name, p.priceCents / p.lessonCount]),
+    [["Single Lesson", 12500], ["5-Lesson Pack", 11500], ["10-Lesson Pack", 10000], ["Small Group Lesson", 5000]]);
+  const group = pub.packages.find((p) => p.kind === "group");
+
+  // Group of 4 pays $200; group of 2 is refused.
+  const client = ok(await call("POST", "/api/c/sam/signup", { name: "Pat", email: "pat@example.com", password: "password12" }), 201).token;
+  assert.equal((await call("POST", "/api/c/sam/checkout", { packageId: group.id, people: 2 }, client)).status, 400);
+  const g = ok(await call("POST", "/api/c/sam/checkout", { packageId: group.id, people: 4 }, client));
+  ok(await call("POST", `/api/c/sam/purchases/${g.purchaseId}/confirm`, {}, client));
+  const single = pub.packages.find((p) => p.name === "Single Lesson");
+  const s = ok(await call("POST", "/api/c/sam/checkout", { packageId: single.id, people: 9 }, client));
+  ok(await call("POST", `/api/c/sam/purchases/${s.purchaseId}/confirm`, {}, client));
+  const [gp] = await q(`SELECT amount_cents, party_size, package_kind FROM purchases WHERE id = $1`, [g.purchaseId]);
+  assert.deepEqual(gp, { amount_cents: 20000, party_size: 4, package_kind: "group" });
+  const [sp] = await q(`SELECT amount_cents, party_size FROM purchases WHERE id = $1`, [s.purchaseId]);
+  assert.deepEqual(sp, { amount_cents: 12500, party_size: 1 }, "headcount ignored for private lessons");
+
+  // Client picks which credit to use; the group lesson shows as a group of 4.
+  let me = ok(await call("GET", "/api/c/sam/me", null, client));
+  assert.equal(me.creditsRemaining, 2);
+  const slot = new Date(Math.ceil((Date.now() + 3 * 864e5) / 36e5) * 36e5).toISOString();
+  const gl = ok(await call("POST", "/api/c/sam/lessons", { startsAt: slot, purchaseId: g.purchaseId }, client), 201).lesson;
+  assert.equal(gl.kind, "group"); assert.equal(gl.partySize, 4);
+  me = ok(await call("GET", "/api/c/sam/me", null, client));
+  assert.equal(me.credits.length, 1); assert.equal(me.credits[0].kind, "private");
+
+  // Closing out a group lesson releases the full $200.
+  const past = ok(await call("POST", "/api/coach/lessons", { clientId: 1, purchaseId: s.purchaseId, startsAt: new Date(Date.now() - 2 * 36e5).toISOString() }, coach), 201).lesson;
+  assert.equal(past.kind, "private");
+  await q(`UPDATE lessons SET starts_at = NOW() - INTERVAL '3 hours', ends_at = NOW() - INTERVAL '2 hours' WHERE id = $1`, [gl.id]);
+  ok(await call("POST", `/api/coach/lessons/${gl.id}/status`, { status: "completed" }, coach));
+  const [r] = await q(`SELECT amount_cents FROM releases WHERE lesson_id = $1`, [gl.id]);
+  assert.equal(r.amount_cents, 20000);
+
+  // Corporate: quote request -> private offer link -> purchase.
+  ok(await call("POST", "/api/c/sam/inquiries", { name: "Dana HR", email: "dana@acme.com", company: "Acme", groupSize: "20", message: "Monthly wellness sessions" }), 201);
+  ok(await call("POST", "/api/c/sam/inquiries", { name: "Bot", email: "bot@x.com", website: "spam" }));
+  let dash = ok(await call("GET", "/api/coach/dashboard", null, coach));
+  assert.equal(dash.inquiries.length, 1);
+  assert.equal(dash.inquiries[0].status, "new");
+  const offer = ok(await call("POST", "/api/coach/packages", { name: "Acme Wellness", lessonCount: 4, priceCents: 160000, offer: true, offerFor: "Acme" }, coach), 201).package;
+  assert.ok(offer.offerToken);
+  assert.equal(ok(await call("GET", "/api/c/sam")).packages.some((p) => p.isOffer), false, "offers stay off the public page");
+  assert.equal(ok(await call("GET", `/api/c/sam?offer=${offer.offerToken}`)).offer.name, "Acme Wellness");
+  const dana = ok(await call("POST", "/api/c/sam/signup", { name: "Dana", email: "dana@acme.com", password: "password12" }), 201).token;
+  assert.equal((await call("POST", "/api/c/sam/checkout", { packageId: offer.id }, dana)).status, 404, "needs the link");
+  ok(await call("POST", "/api/c/sam/checkout", { packageId: offer.id, offer: offer.offerToken }, dana));
+  ok(await call("PUT", `/api/coach/inquiries/${dash.inquiries[0].id}`, { status: "replied" }, coach));
+  dash = ok(await call("GET", "/api/coach/dashboard", null, coach));
+  assert.equal(dash.inquiries[0].status, "replied");
+
+  // Group bought in person: amount defaults to $50 x people.
+  ok(await call("POST", "/api/coach/purchases/offline", { clientId: 1, packageId: group.id, people: 5 }, coach), 201);
+  const [off] = await q(`SELECT amount_cents, party_size FROM purchases WHERE method = 'offline'`);
+  assert.deepEqual(off, { amount_cents: 25000, party_size: 5 });
+});
