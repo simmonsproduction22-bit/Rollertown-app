@@ -142,7 +142,7 @@ comment on column public.members.external_ref is 'ID from the source system (Min
 
 alter table public.families
   add constraint families_billing_member_fk foreign key (billing_member_id)
-  references public.members(id) on delete set null;
+  references public.members(id) on delete set null deferrable initially deferred;
 
 create table public.guardians (
   id                 uuid primary key default gen_random_uuid(),
