@@ -32,7 +32,7 @@ function toSql(): string {
     out.push(`insert into public.profiles (id, full_name, email) values (${sqlValue(u.id)}, ${sqlValue(u.name)}, ${sqlValue(u.email)}) on conflict do nothing;`);
   }
   for (const table of TABLE_ORDER) {
-    for (const row of data[table] as Record<string, unknown>[]) {
+    for (const row of data[table] as unknown as Record<string, unknown>[]) {
       const cols = Object.keys(row).filter((c) => !(IDENTITY_TABLES.has(table) && c === "id"));
       // Typed arrays: room_kinds is an enum array, location_ids is uuid[]
       const vals = cols.map((c) => {
@@ -61,7 +61,7 @@ async function seedSupabase(): Promise<void> {
   }
   const data = generateDemoDataset();
   for (const table of TABLE_ORDER) {
-    const rows = (data[table] as Record<string, unknown>[]).map((r) => (IDENTITY_TABLES.has(table) ? { ...r, id: undefined } : r));
+    const rows = (data[table] as unknown as Record<string, unknown>[]).map((r) => (IDENTITY_TABLES.has(table) ? { ...r, id: undefined } : r));
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await admin.from(table).insert(rows.slice(i, i + 500));
       if (error) throw new Error(`${table}: ${error.message}`);

@@ -139,7 +139,7 @@ export function seedCommerce(b: SeedBuilder, gs: GymSeed, sch: ScheduleSeed): vo
   const reversal = computeRefundReversal({ splits: splits.map((s) => ({ id: s.id, party: s.party, coachId: s.coach_id, amountCents: s.amount_cents, reversedCents: 0 })), totalCents: refundTxn.total_cents, refundedCents: 0, refundCents: refundAmount });
   b.data.splits = b.data.splits.map((s) => ({ ...s, reversed_cents: s.reversed_cents + (reversal.find((r) => r.splitId === s.id)?.reverseCents ?? 0) }));
   b.data.transactions = b.data.transactions.map((t) => (t.id === refundTxn.id ? { ...t, refunded_cents: refundAmount, status: "partially_refunded" } : t));
-  b.data.entitlements = b.data.entitlements.map((e) => (e.id === refundEnt.id ? { ...e, credits_total: 1, status: "exhausted" } : e));
+  b.data.entitlements = b.data.entitlements.map((e) => (e.id === refundEnt.id ? { ...e, credits_total: 1, amount_paid_cents: e.amount_paid_cents - refundAmount, status: "exhausted" } : e));
   const refund = b.add("refunds", { id: b.id(), gym_id: g, transaction_id: refundTxn.id, amount_cents: refundAmount, reason: "Moving out of state", credits_action: "remove", credits_changed: 4, policy_applied: "unused_prorated", was_override: false, stripe_refund_id: "re_demo_0001", created_by: DEMO_USERS.owner.id, created_at: b.iso(5) });
   b.add("credit_ledger", { gym_id: g, entitlement_id: refundEnt.id, delta: -4, reason: "refund_remove", ref_id: refund.id, created_at: b.iso(5) });
   b.add("audit_log", { gym_id: g, actor_user_id: DEMO_USERS.owner.id, actor_label: DEMO_USERS.owner.name, action: "refund.created", entity: "transactions", entity_id: refundTxn.id, details: { amount_cents: refundAmount, credits_removed: 4, policy: "unused_prorated" }, created_at: b.iso(5) });
