@@ -6,18 +6,20 @@ import { runDueAutomations } from "@/lib/services/comms";
 import { retryFailedPayment } from "@/lib/services/dunning";
 import { sendSms } from "@/lib/messaging/sms";
 import { emailProvider } from "@/lib/messaging/email";
+import { materializeSessions } from "@/lib/services/onboarding";
 
 /**
  * Run every 15 minutes (Vercel Cron / Supabase pg_cron → HTTP). Protected by
  * `Authorization: Bearer $CRON_SECRET`. Sends due reminders, automation steps,
- * and retries failed payments per the dunning schedule.
+ * retries failed payments per the dunning schedule, and keeps recurring
+ * classes materialized through the booking window.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   const store = await serviceStore();
   const now = new Date();
-  const summary: Record<string, number> = { reminders: 0, automations: 0, retries: 0 };
+  const summary: Record<string, number> = { reminders: 0, automations: 0, retries: 0, sessions: 0 };
   for (const g of await store.list("gyms")) {
     const ctx: Ctx = { store, gym: await loadGym(store, g.id), actor: { userId: null, label: "cron", role: "system" }, payments: payments(), now: () => now };
     for (const o of (await store.list("notifications_outbox", { where: { gym_id: g.id, status: "queued" } })).filter((x) => x.send_after <= now.toISOString())) {
@@ -26,6 +28,7 @@ export async function GET(req: NextRequest) {
       summary.reminders++;
     }
     summary.automations += await runDueAutomations(ctx);
+    summary.sessions += await materializeSessions(ctx);
     for (const t of (await store.list("transactions", { where: { gym_id: g.id, status: "failed" } })).filter((x) => x.next_retry_at && x.next_retry_at <= now.toISOString())) {
       await retryFailedPayment(ctx, t.id);
       summary.retries++;

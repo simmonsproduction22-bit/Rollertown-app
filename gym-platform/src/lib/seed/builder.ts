@@ -25,7 +25,7 @@ export function makeRng(seed: number) {
 export type Rng = ReturnType<typeof makeRng>;
 
 export const TABLE_ORDER: readonly TableName[] = [
-  "gyms", "locations", "rooms", "disciplines", "families", "members", "guardians", "coaches", "gym_users",
+  "gyms", "locations", "rooms", "disciplines", "families", "members", "guardians", "coaches", "gym_users", "gym_invites",
   "class_types", "class_series", "class_sessions", "coach_availability", "coach_time_off", "lesson_types",
   "products", "memberships", "membership_holds", "transactions", "transaction_items", "splits", "refunds", "payouts",
   "entitlements", "credit_ledger", "payment_methods", "class_bookings", "check_ins", "private_bookings",

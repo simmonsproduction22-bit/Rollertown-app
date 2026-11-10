@@ -15,6 +15,7 @@ import { createApiKey, createWebhook, revokeApiKey, runImport } from "@/lib/serv
 import { publishWaiverVersion } from "@/lib/services/waivers";
 import { settingsSchema } from "@/lib/domain/settings";
 import { audit } from "@/lib/services/context";
+import { inviteStaff, revokeInvite } from "@/lib/services/onboarding";
 import type { ImportEntity, SourceSystem } from "@/lib/import/presets";
 import type { LeadStage } from "@/lib/data/types";
 
@@ -199,4 +200,19 @@ export async function switchDemoRole(f: FormData) {
 export async function signOut() {
   (await cookies()).delete("gp_demo_role");
   redirect("/login");
+}
+
+export async function inviteAction(f: FormData) {
+  await runAction("settings.manage", "/app/settings?tab=roles", async (ctx) => {
+    const kind = z.enum(["staff_coach", "independent_coach", "head_coach", "manager", "front_desk"]).parse(s(f, "kind"));
+    const r = await inviteStaff(ctx, { email: s(f, "email"), kind, name: s(f, "name") || undefined });
+    return r.emailed ? `Invite emailed to ${r.invite.email}.` : `Invite created, but the email failed to send. Revoke it and try again.`;
+  });
+}
+
+export async function revokeInviteAction(f: FormData) {
+  await runAction("settings.manage", "/app/settings?tab=roles", async (ctx) => {
+    await revokeInvite(ctx, s(f, "inviteId"));
+    return "Invite revoked.";
+  });
 }

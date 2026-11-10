@@ -30,6 +30,12 @@ export function defaultsFor(table: TableName): Record<string, unknown> {
       return { ...base, send_after: now, sent_at: null, status: "queued", error: null, subject: null, ref_id: null };
     case "private_bookings":
       return { ...base, status: "confirmed", room_id: null, booked_by_email: null, booked_by_name: null, notes: null, entitlement_id: null, transaction_id: null, cancelled_at: null, reminder_sent_at: null };
+    case "gym_invites":
+      return { ...base, coach_id: null, invited_by: null, accepted_at: null, accepted_by: null, revoked_at: null };
+    case "class_series":
+      return { ...base, location_id: null, room_id: null, coach_id: null, ends_on: null, is_active: true };
+    case "class_sessions":
+      return { ...base, series_id: null, location_id: null, room_id: null, coach_id: null, is_cancelled: false, notes: null };
     case "refunds":
       return { ...base, credits_action: "none", credits_changed: 0, policy_applied: null, was_override: false, stripe_refund_id: null, created_by: null };
     default:

@@ -30,7 +30,7 @@ Next.js 15 (App Router) + TypeScript + Tailwind, Supabase (Postgres, Auth, RLS, 
 ## Layout
 
 ```
-supabase/migrations/   0001 core → 0008 storage (63 tables, all with RLS)
+supabase/migrations/   0001 core → 0009 invites (64 tables, all with RLS)
 supabase/test/         RLS regression tests + stubs for plain Postgres
 supabase/seed.sql      generated demo data (npm run seed -- --sql)
 src/lib/domain/        pure business rules (splits, refunds, policy, promotion, slots, pricing, liability, retention, dunning, recurrence)
@@ -54,7 +54,7 @@ scripts/               seed.ts, verify-schema.sh
 cd gym-platform
 npm install
 cp .env.example .env.local   # leave keys blank for demo mode
-npm test                     # 59 tests
+npm test                     # 72 tests
 npm run typecheck
 ```
 
@@ -72,6 +72,8 @@ npm run seed
 ```bash
 DATABASE_URL=postgres://... scripts/verify-schema.sh
 ```
+
+**Supabase Auth redirect URLs.** Add `${NEXT_PUBLIC_APP_URL}/auth/callback**` to the allowed redirect URLs. The trailing wildcard lets magic links carry `?next=/invite/...` back to the invite page. The callback only follows same-site paths.
 
 ### Environment variables
 See `.env.example`. It holds Supabase URL/anon/service keys, Stripe secret/publishable/webhook keys, `PLATFORM_FEE_BPS`, SMS and email provider keys, and `WEBHOOK_SIGNING_SECRET`, which is also used to sign member QR codes. Secrets are read only on the server through `src/lib/env.ts`.
@@ -109,10 +111,10 @@ Example: Marcus's $400 boxing pack has an 85% coach split. The platform gets $12
 
 ## What's working vs stubbed
 
-**Working and tested (59 tests, plus RLS tests on real Postgres 16):**
+**Working and tested (72 tests, plus 28 RLS checks on real Postgres 16):**
 - **Schema and security**
   - Full schema: indexes, comments, CHECK constraints, and an exclusion constraint that stops a coach being double-booked.
-  - Capacity trigger, append-only audit log, and RLS on all 63 tables.
+  - Capacity trigger, append-only audit log, and RLS on all 64 tables.
   - RLS covers staff, desk, manager, coach (staff or independent), member/guardian and anon storefront access. Tests confirm gyms can't see each other's data.
 - **Money**
   - Revenue splits, refund reversal, cancellation policy and package refund quotes.
@@ -132,6 +134,11 @@ Example: Marcus's $400 boxing pack has an 85% coach split. The platform gets $12
   - Leads pipeline, automations engine, two-way SMS inbox (inbound routing, STOP opt-out) and retention alerts.
   - Review requests.
   - Reports: revenue by party, attendance, growth and churn, MRR, coach payouts with rent, package liability, class fill.
+- **Onboarding and team**
+  - The setup wizard saves every step. It creates the gym, disciplines, and belt systems from templates (BJJ adult, BJJ kids, Muay Thai), each with editable requirements.
+  - The first classes become weekly series, and sessions are created for the booking window right away. The cron keeps every series filled ahead after that.
+  - Staff and coach invites work from onboarding or Settings → Roles. Each invite emails a one-time link that expires in 14 days. Only a SHA-256 hash of the token is stored, and an invite can only be accepted by someone signed in with the invited email.
+  - Coach profiles are created at invite time, so splits and rent can be set before the coach accepts.
 - **Data in and out**
   - CSV import mapping and validation for Mindbody, Zen Planner, Booksy and Gymdesk.
   - Outgoing webhooks signed with HMAC.
@@ -145,7 +152,6 @@ Example: Marcus's $400 boxing pack has an 85% coach split. The platform gets $12
 - Supabase falls back to the in-memory demo store. In demo mode, waiver PDFs are generated on request and not uploaded to Storage.
 - The public private-lesson booking charges a stub card in demo mode. Live mode still needs the Stripe Payment Element on the page; the server already creates the PaymentIntent.
 - Memberships are billed per charge, not yet as Stripe Billing subscriptions.
-- Onboarding creates the gym, disciplines and Stripe Connect link. The class, rank-system and coach-invite steps are walk-through only.
 - The kiosk QR input expects a USB or Bluetooth scanner, which types like a keyboard. There's no camera scanning yet.
 - Rate limiting is in-memory per server instance (public forms and the API).
 - Curriculum video upload UI isn't built; techniques take a URL.
@@ -160,24 +166,24 @@ Example: Marcus's $400 boxing pack has an 85% coach split. The platform gets $12
 | `GET /api/certificates/[id]` | Belt certificate PDF |
 | `POST /api/webhooks/stripe` | Stripe Connect reconciliation (signature verified) |
 | `POST /api/webhooks/sms?gym=slug` | Twilio inbound SMS → two-way inbox (signature verified) |
-| `GET /api/cron` | Sends due reminders, automation steps and payment retries (`Bearer $CRON_SECRET`) |
+| `GET /api/cron` | Sends due reminders, automation steps and payment retries, and creates upcoming class sessions (`Bearer $CRON_SECRET`) |
+| `GET /invite/[token]` | Accept a staff or coach invite (magic-link sign-in with the invited email) |
 
 ## Verification done
-- 63 vitest tests (domain unit tests + service integration tests on the demo store)
-- `scripts/verify-schema.sh`: all migrations and 23 RLS checks on real Postgres 16, plus the full seed loaded under every constraint
+- 72 vitest tests (domain unit tests + service integration tests on the demo store)
+- `scripts/verify-schema.sh`: all migrations and 28 RLS checks on real Postgres 16, plus the full seed loaded under every constraint
 - `next build` passes; every page returns 200 for the right roles and redirects for the wrong ones
 - `tests/e2e/smoke.cjs` (Playwright): public email-only trial booking, owner partial refund, member class booking
 
 ## v2 priorities
 1. **Live payments:** Stripe Payment Element on the public pages, Stripe Billing subscriptions for autopay, and full reconciliation in the Stripe webhook (charges, refunds, disputes, card-updater events).
-2. **Auth hardening:** role-based invites (email the coach or staff member and accept), per-location staff scoping, and a multi-gym switcher.
+2. **Auth hardening:** per-location staff scoping, a multi-gym switcher, and changing or removing roles from Settings → Roles.
 3. **Lock down member writes:** column-level grants or RPCs, so a member can't change their own status or tags through the API.
 4. **Shared rate limiting:** Redis/Upstash instead of in-memory limits, plus a CAPTCHA on public forms.
-5. **Finish onboarding:** persist the first classes, seed rank systems from the chosen templates, and send coach invites.
-6. **Kiosk and PWA:** camera QR scanning, offline-tolerant kiosk, a service worker, and push notifications.
-7. **Curriculum and testing:** video uploads to Storage, and online belt-testing registration and payment from the member app.
-8. **CI:** Playwright suite (booking, checkout, refund, waiver re-sign, guardian flows) plus `scripts/verify-schema.sh` running on every PR.
-9. **Accessibility pass:** axe audit with screen readers, and a light-theme toggle in the UI (tokens already exist).
+5. **Kiosk and PWA:** camera QR scanning, offline-tolerant kiosk, a service worker, and push notifications.
+6. **Curriculum and testing:** video uploads to Storage, and online belt-testing registration and payment from the member app.
+7. **CI:** Playwright suite (booking, checkout, refund, waiver re-sign, guardian flows) plus `scripts/verify-schema.sh` running on every PR.
+8. **Accessibility pass:** axe audit with screen readers, and a light-theme toggle in the UI (tokens already exist).
 
 ## Product name ideas
 1. **Matwork**

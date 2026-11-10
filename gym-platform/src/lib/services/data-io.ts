@@ -75,7 +75,7 @@ export async function runImport(ctx: Ctx, input: { text: string; entity: ImportE
 }
 
 // ---------------------------------------------------------------- export
-const SECRET_COLUMNS: Record<string, string[]> = { api_keys: ["key_hash"], webhook_endpoints: ["secret"] };
+const SECRET_COLUMNS: Record<string, string[]> = { api_keys: ["key_hash"], webhook_endpoints: ["secret"], gym_invites: ["token_hash"] };
 
 /** One-click full export: a CSV per table + every signed waiver as a PDF. Free, always. */
 export async function exportZip(ctx: Ctx): Promise<Uint8Array> {

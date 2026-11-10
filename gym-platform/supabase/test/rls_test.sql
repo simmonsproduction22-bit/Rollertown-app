@@ -40,6 +40,8 @@ insert into transactions(id, gym_id, member_id, description, subtotal_cents, tot
   ('50000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-000000000002', 'Gym membership', 15000, 15000, 'succeeded'),
   ('50000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-00000000000b', '20000000-0000-0000-0000-000000000003', 'Gym B thing', 5000, 5000, 'succeeded');
 insert into audit_log(gym_id, action, entity) values ('10000000-0000-0000-0000-00000000000a', 'test', 'test');
+insert into gym_invites(gym_id, email, role, token_hash) values
+  ('10000000-0000-0000-0000-00000000000a', 'desk@example.com', 'front_desk', repeat('a', 64));
 
 create or replace function pg_temp.expect(label text, actual bigint, expected bigint) returns void language plpgsql as $$
 begin
@@ -53,6 +55,7 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-0000000000a1';
 select pg_temp.expect('owner A sees only gym A members', (select count(*) from members), 2);
 select pg_temp.expect('owner A sees only gym A transactions', (select count(*) from transactions), 1);
 select pg_temp.expect('owner A sees audit log', (select count(*) from audit_log), 1);
+select pg_temp.expect('owner A sees own invites', (select count(*) from gym_invites), 1);
 select pg_temp.expect('owner A cannot see gym B member by id', (select count(*) from members where id = '20000000-0000-0000-0000-000000000003'), 0);
 
 -- Member of gym A
@@ -62,6 +65,7 @@ select pg_temp.expect('member sees no other transactions', (select count(*) from
 select pg_temp.expect('member sees own package', (select count(*) from entitlements), 1);
 select pg_temp.expect('member cannot read audit log', (select count(*) from audit_log), 0);
 select pg_temp.expect('member cannot read api keys', (select count(*) from api_keys), 0);
+select pg_temp.expect('member cannot read invites', (select count(*) from gym_invites), 0);
 
 -- Independent coach of gym A
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-0000000000a3';
@@ -74,6 +78,7 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-0000000000b1';
 select pg_temp.expect('owner B sees only gym B members', (select count(*) from members), 1);
 select pg_temp.expect('owner B sees no gym A packages', (select count(*) from entitlements), 0);
 select pg_temp.expect('owner B sees no gym A audit', (select count(*) from audit_log), 0);
+select pg_temp.expect('owner B sees no gym A invites', (select count(*) from gym_invites), 0);
 
 -- Cross-tenant write must fail
 do $$ begin
@@ -91,6 +96,7 @@ select pg_temp.expect('anon sees public gyms', (select count(*) from gyms), 2);
 select pg_temp.expect('anon sees public products', (select count(*) from products), 1);
 select pg_temp.expect('anon sees no members', (select count(*) from members), 0);
 select pg_temp.expect('anon sees no transactions', (select count(*) from transactions), 0);
+select pg_temp.expect('anon sees no invites', (select count(*) from gym_invites), 0);
 
 -- Audit log is append-only
 set local role postgres;
@@ -101,6 +107,15 @@ do $$ begin
   exception when raise_exception then
     if sqlerrm like 'FAIL%' then raise; end if;
     raise notice 'ok  audit log immutable';
+  end;
+end $$;
+
+-- A coach invite must carry a coach profile
+do $$ begin
+  begin
+    insert into gym_invites(gym_id, email, role, token_hash) values ('10000000-0000-0000-0000-00000000000a', 'c@example.com', 'coach', repeat('b', 64));
+    raise exception 'FAIL: coach invite without coach_id';
+  exception when check_violation then raise notice 'ok  coach invite requires coach profile';
   end;
 end $$;
 

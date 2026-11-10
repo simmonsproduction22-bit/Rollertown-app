@@ -48,6 +48,8 @@ export interface Coach {
   rent_model: RentModel; rent_amount_cents: number; stripe_account_id: string | null; stripe_payouts_enabled: boolean; accepts_privates: boolean; is_active: boolean; created_at: ISO;
 }
 export interface GymUser { id: UUID; gym_id: UUID; user_id: UUID; role: Role; coach_id: UUID | null; member_id: UUID | null; location_ids: UUID[] | null; invited_email: string | null; created_at: ISO }
+export type InviteRole = "manager" | "front_desk" | "head_coach" | "coach" | "independent_coach";
+export interface GymInvite { id: UUID; gym_id: UUID; email: string; role: InviteRole; coach_id: UUID | null; token_hash: string; invited_by: UUID | null; expires_at: ISO; accepted_at: ISO | null; accepted_by: UUID | null; revoked_at: ISO | null; created_at: ISO }
 export interface Discipline { id: UUID; gym_id: UUID; name: string; slug: string; created_at: ISO }
 export interface AuditEntry { id?: number; gym_id: UUID; actor_user_id: UUID | null; actor_label: string | null; action: string; entity: string; entity_id: UUID | null; details: Record<string, unknown>; created_at: ISO }
 
@@ -112,7 +114,7 @@ export interface WebhookDelivery { id?: number; gym_id: UUID; endpoint_id: UUID;
 /** Table name → row type. The Store is typed by this map. */
 export interface Tables {
   gyms: Gym; locations: Location; rooms: Room; families: Family; members: Member; guardians: Guardian; coaches: Coach;
-  gym_users: GymUser; disciplines: Discipline; audit_log: AuditEntry;
+  gym_users: GymUser; gym_invites: GymInvite; disciplines: Discipline; audit_log: AuditEntry;
   class_types: ClassType; class_series: ClassSeries; class_sessions: ClassSession; class_bookings: ClassBooking; check_ins: CheckIn;
   coach_availability: CoachAvailability; coach_time_off: CoachTimeOff; lesson_types: LessonType; private_bookings: PrivateBooking;
   private_booking_participants: PrivateParticipant;

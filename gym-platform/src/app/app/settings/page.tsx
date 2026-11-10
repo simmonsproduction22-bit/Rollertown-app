@@ -1,6 +1,8 @@
 import { one, pageCtx, type SP } from "@/lib/ctx";
 import { Card, Field, Flash, PageHeader, Select, Table, Tabs } from "@/components/ui";
-import { coachTermsAction, settingsAction, waiverVersionAction } from "@/app/actions/staff";
+import { coachTermsAction, inviteAction, revokeInviteAction, settingsAction, waiverVersionAction } from "@/app/actions/staff";
+import { pendingInvites } from "@/lib/services/onboarding";
+import { dateFmt } from "@/lib/format";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import { DEMO_USERS } from "@/lib/seed/constants";
 
@@ -13,8 +15,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: SP 
   const g = ctx.gym;
   const st = g.settings;
   const tabs = ["policies", "coaches", "waivers", "roles", "branding"].map((k) => ({ key: k, label: k[0].toUpperCase() + k.slice(1), href: `/app/settings?tab=${k}` }));
-  const [coaches, waivers, gymUsers] = await Promise.all([
-    ctx.store.list("coaches", { where: { gym_id: g.id } }), ctx.store.list("waiver_templates", { where: { gym_id: g.id, is_current: true } }), ctx.store.list("gym_users", { where: { gym_id: g.id } }),
+  const [coaches, waivers, gymUsers, invites] = await Promise.all([
+    ctx.store.list("coaches", { where: { gym_id: g.id } }), ctx.store.list("waiver_templates", { where: { gym_id: g.id, is_current: true } }), ctx.store.list("gym_users", { where: { gym_id: g.id } }), tab === "roles" ? pendingInvites(ctx) : Promise.resolve([]),
   ]);
   const Check = ({ name, label, on }: { name: string; label: string; on: boolean }) => <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name={name} defaultChecked={on} className="h-5 w-5" />{label}</label>;
   return (
@@ -86,6 +88,37 @@ export default async function SettingsPage({ searchParams }: { searchParams: SP 
           </Table>
           <p className="mt-3 text-xs text-muted">Enforced twice: in the app and by Postgres row-level security.</p>
         </Card>
+      )}
+      {tab === "roles" && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <Card title="Invite someone">
+            <form action={inviteAction} className="space-y-3">
+              <Field label="Email" name="email" type="email" required autoComplete="off" />
+              <Field label="Name (optional)" name="name" hint="Shown on the coach's public page. They can change it." />
+              <Select label="Role" name="kind" defaultValue="staff_coach">
+                <option value="staff_coach">Coach (staff)</option>
+                <option value="independent_coach">Independent coach (sells own privates)</option>
+                <option value="head_coach">Head coach</option>
+                <option value="front_desk">Front desk</option>
+                <option value="manager">Manager</option>
+              </Select>
+              <button className="min-h-11 rounded-lg bg-brand px-5 font-semibold text-brand-fg">Send invite</button>
+              <p className="text-xs text-muted">They get a one-time link, good for 14 days, and must sign in with this email. Coach profiles are created now so you can set splits and rent first.</p>
+            </form>
+          </Card>
+          <Card title="Pending invites">
+            <Table head={["Email", "Role", "Expires", ""]} empty={invites.length ? undefined : "No pending invites."}>
+              {invites.map((i) => (
+                <tr key={i.id}>
+                  <td className="td">{i.email}</td>
+                  <td className="td">{ROLE_LABELS[i.role]}</td>
+                  <td className="td text-muted">{dateFmt(i.expires_at, g.timezone)}</td>
+                  <td className="td"><form action={revokeInviteAction}><input type="hidden" name="inviteId" value={i.id} /><button className="text-sm text-bad underline">Revoke</button></form></td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
+        </div>
       )}
     </>
   );
