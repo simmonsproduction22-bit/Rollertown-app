@@ -6,6 +6,8 @@ All-in-one gym software for martial arts, MMA, BJJ, Muay Thai and boxing gyms an
 - **Stack:** Next.js 15 (App Router), React 19, TypeScript, Tailwind 3, Supabase (Postgres, Auth, RLS, Storage), Stripe Connect, Twilio-style SMS, Resend-style email, zod, vitest, Playwright.
 - **Status:** a complete first draft. Every screen works in demo mode on seeded data with no keys. Nothing has been run against a real Supabase project or a real Stripe test account yet.
 
+Screenshots of the demo are in `docs/screenshots/`.
+
 ## Run it
 
 ```bash
