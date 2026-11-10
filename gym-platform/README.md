@@ -7,7 +7,21 @@ All-inclusive gym management for martial arts gyms, MMA gyms and independent coa
 - No marketplace commissions, no "new client" cut, no paid listings.
 - Free one-click data export and free card-on-file migration.
 
-> **Build status: first pass, stopped at a clean point.** The database, business logic, services and seed data are done and tested. **The Next.js pages and UI have not been built yet.** See [Where this stopped](#where-this-stopped).
+> **Build status: first draft, complete end to end.** Database, business logic, services, all pages, the REST API and webhooks are built. Every screen runs on seeded demo data with no keys set. See [What's working vs stubbed](#whats-working-vs-stubbed).
+
+## Quick tour (demo mode)
+```bash
+npm install && npm run dev   # http://localhost:3000
+```
+- `/`: marketing site (why switch, martial arts, private coaching, one-plan pricing, FAQ, migration promise)
+- `/login`: pick a role (owner, manager, front desk, head coach, staff coach, independent coach, member, parent)
+- `/app`: owner dashboard; `/app/schedule` (day, week, coach and room views); `/app/members/[id]` (packages, attendance, belts, waivers, refunds, notes, SMS)
+- `/app/coach`: coach dashboard; `/app/coaches`: owner view of every coach and the gym's share
+- `/app/payments`, `/app/reports`, `/app/messages` (SMS inbox, lead pipeline, automations), `/app/ranks`, `/app/fight-team`, `/app/pos`, `/app/import`, `/app/settings`, `/app/developers`
+- `/kiosk`: front-desk check-in (name search or QR scanner)
+- `/m`: member PWA (QR code, waiver signing, bookings, packages, belt progress, family switcher); `/m/book`, `/m/privates`, `/m/pay`
+- `/g/demo-mma` and `/g/demo-mma/coach/marcus-bell`: public booking with only an email
+- `/onboarding`: gym setup wizard
 
 ## Stack
 
@@ -27,6 +41,9 @@ src/lib/services/      checkout, refunds, bookings, check-in, waivers, ranks, re
 src/lib/payments/      PaymentsProvider: Stripe Connect implementation + test-mode stub
 src/lib/messaging/     SMS (console | Twilio) and email (console | Resend)
 src/lib/auth/          roles/capabilities, session (demo role cookie or Supabase Auth)
+src/app/               pages: marketing, /login, /onboarding, /app/* (staff), /m/* (member PWA), /kiosk, /g/[slug] (public), /api/*
+src/app/actions/       server actions (zod-validated, capability-checked, flash redirects)
+src/components/        UI kit, charts, signature pad
 tests/                 vitest: domain unit tests + service integration tests
 scripts/               seed.ts, verify-schema.sh
 ```
@@ -123,50 +140,44 @@ Example: Marcus's $400 boxing pack has an 85% coach split. The platform gets $12
   - About 1,100 bookings, 188 transactions, packages, one refund, a failed payment in dunning, and a card migration in progress.
   - A 5-fighter team with records, camps, weigh-ins and expiring documents, plus leads, threads and automations.
 
-**Stubbed until keys are added:** Stripe (stub provider), SMS and email (logged to the console), and Supabase (in-memory demo store). In demo mode, waiver PDFs aren't uploaded to Storage.
+**Stubbed or partial:**
+- Stripe, SMS and email run on stubs until keys are set. The Stripe stub declines any payment method ID containing `decline`.
+- Supabase falls back to the in-memory demo store. In demo mode, waiver PDFs are generated on request and not uploaded to Storage.
+- The public private-lesson booking charges a stub card in demo mode. Live mode still needs the Stripe Payment Element on the page; the server already creates the PaymentIntent.
+- Memberships are billed per charge, not yet as Stripe Billing subscriptions.
+- Onboarding creates the gym, disciplines and Stripe Connect link. The class, rank-system and coach-invite steps are walk-through only.
+- The kiosk QR input expects a USB or Bluetooth scanner, which types like a keyboard. There's no camera scanning yet.
+- Rate limiting is in-memory per server instance (public forms and the API).
+- Curriculum video upload UI isn't built; techniques take a URL.
+- The demo store resets on server restart.
 
-## Where this stopped
+## Routes
+| Route | Purpose |
+|---|---|
+| `GET/POST /api/v1/...` | Public REST API (Bearer API key, read/write scopes, 120 req/min, paginated `{success,data,error,meta}`) |
+| `GET /api/export` | One-click ZIP of every table as CSV + all waiver PDFs (owner/manager) |
+| `GET /api/waivers/[id]` | Signed waiver PDF (staff or the member/guardian) |
+| `GET /api/certificates/[id]` | Belt certificate PDF |
+| `POST /api/webhooks/stripe` | Stripe Connect reconciliation (signature verified) |
+| `POST /api/webhooks/sms?gym=slug` | Twilio inbound SMS → two-way inbox (signature verified) |
+| `GET /api/cron` | Sends due reminders, automation steps and payment retries (`Bearer $CRON_SECRET`) |
 
-The stop came after `src/lib/services/dunning.ts`. Everything up to there typechecks, passes tests and is committed.
+## Verification done
+- 63 vitest tests (domain unit tests + service integration tests on the demo store)
+- `scripts/verify-schema.sh`: all migrations and 23 RLS checks on real Postgres 16, plus the full seed loaded under every constraint
+- `next build` passes; every page returns 200 for the right roles and redirects for the wrong ones
+- `tests/e2e/smoke.cjs` (Playwright): public email-only trial booking, owner partial refund, member class booking
 
-**Not built yet (next session, in this order):**
-1. **Remaining services:**
-   - import runner (persisting validated rows)
-   - one-click export ZIP (CSVs plus waiver PDFs)
-   - API key create/verify
-   - coach dashboard aggregates
-   - POS sale with stock decrement
-   - member CRUD and profile aggregate
-   - card-migration matching
-   - fight record summaries
-2. **App shell:** `src/app` layout, Tailwind theme (dark, high contrast), UI kit, demo role switcher, login.
-3. **Pages:**
-   - marketing and pricing, the onboarding wizard, and the owner dashboard
-   - schedule (day, week, coach and room views)
-   - members list and profile
-   - coach dashboard and public coach page
-   - payments, payouts and refunds
-   - reports
-   - inbox, automations and leads
-   - ranks and curriculum
-   - fight team
-   - point of sale and import wizard
-   - settings, and developers (API keys and webhooks)
-   - kiosk, the member PWA, and the public gym booking page
-4. **Routes:**
-   - `/api/v1/*` public REST API
-   - Stripe and SMS webhooks
-   - cron endpoints for automations, reminders and dunning
-   - `/api/export`
-
-## v2 priorities (after the pages above)
-1. Stripe webhook reconciliation, Stripe Billing subscriptions for autopay, and Stripe's card-updater webhooks.
-2. Supabase Auth magic-link sign-in, invites by role, and per-location staff scoping.
-3. Playwright end-to-end tests for booking, checkout and refunds.
-4. Offline-capable kiosk, plus a PWA install and push notifications.
-5. Lock down which member columns members can update, using column grants or RPCs.
-6. Rate limiting on public routes (lead form, email-only booking).
-7. Video uploads for curriculum, family billing roll-ups, and multi-gym owner switching.
+## v2 priorities
+1. **Live payments:** Stripe Payment Element on the public pages, Stripe Billing subscriptions for autopay, and full reconciliation in the Stripe webhook (charges, refunds, disputes, card-updater events).
+2. **Auth hardening:** role-based invites (email the coach or staff member and accept), per-location staff scoping, and a multi-gym switcher.
+3. **Lock down member writes:** column-level grants or RPCs, so a member can't change their own status or tags through the API.
+4. **Shared rate limiting:** Redis/Upstash instead of in-memory limits, plus a CAPTCHA on public forms.
+5. **Finish onboarding:** persist the first classes, seed rank systems from the chosen templates, and send coach invites.
+6. **Kiosk and PWA:** camera QR scanning, offline-tolerant kiosk, a service worker, and push notifications.
+7. **Curriculum and testing:** video uploads to Storage, and online belt-testing registration and payment from the member app.
+8. **CI:** Playwright suite (booking, checkout, refund, waiver re-sign, guardian flows) plus `scripts/verify-schema.sh` running on every PR.
+9. **Accessibility pass:** axe audit with screen readers, and a light-theme toggle in the UI (tokens already exist).
 
 ## Product name ideas
 1. **Matwork**
