@@ -182,7 +182,9 @@ export async function apiKeyAction(f: FormData) {
   let raw = "";
   await runAction("developers.manage", "/app/developers", async (ctx) => {
     raw = (await createApiKey(ctx, { name: s(f, "name"), scopes: f.getAll("scope").map(String) as ("read" | "write")[] })).raw;
-    return `New key (copy it now, it won't be shown again): ${raw}`;
+    // Shown once via a short-lived httpOnly cookie, never in the URL (history/logs).
+    (await cookies()).set("gp_new_key", raw, { httpOnly: true, sameSite: "strict", path: "/app/developers", maxAge: 120 });
+    return "Key created. Copy it below now; it won't be shown again.";
   });
 }
 export async function webhookAction(f: FormData) {
